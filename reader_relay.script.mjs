@@ -3,6 +3,8 @@ const prevKVS = {}
 
 const shellyCallsQueue = []
 
+const wsConnected = {current: false}
+
 function callNext() {
     const call = shellyCallsQueue[0]
     if (!call) {
@@ -39,64 +41,157 @@ function enqueueShellyCall(method, params, callback) {
     }
 }
 
-function notifyReadersAboutWifi()
-{
-    Shelly.emitEvent("KVS.Set", {key: "wifi_restored", value: 1})
-}
-
-function dispatchEvent(event)
-{
+function dispatchEvent(event) {
     print("============================================Event: ", JSON.stringify(event));
 
     const eventName = event.info.event
 
 
     if (eventName === "sta_ip_acquired") {
-        notifyReadersAboutWifi()
         return
     }
 }
 
-function onReadCard(card_id, KVS)
-{
-    let isValid = false
-    // TO DO: check for validity in KVS
+function onReadCard(card_id, KVS) {
+    const cardKVSEntry = KVS["bms/i/" + card_id]
+    if (!cardKVSEntry) {
+        return
+    }
+
     
-    if(isValid)
-    {
-        Shelly.call("Switch.Set", {id: 0, on: true, toggle_after: 5})
-    }
-}
+    const expirationTime = cardKVSEntry.value
+    print(expirationTime)
 
-function onGotKVSOnDispatchStatus(result) {
-    const KVS = result.items
-
-    function handleKVSChange(key, callback) {
-        const newValue = KVS[key] ? KVS[key].value : null
-        if (prevKVS[key] !== newValue) {
-            prevKVS[key] = newValue
-
-            callback(newValue)
-        }
+    const currTime = Shelly.getComponentStatus("sys").unixtime;
+    if (expirationTime && expirationTime < currTime) {
+        return;
     }
 
-    handleKVSChange("read_card_id", function (card_id) {
-        onReadCard(card_id, KVS)
+    // if (items["bms/cfg/permanent_state"] === undefined || items["bms/cfg/permanent_state"]["value"] === undefined) {
+    //     return;
+    // }
+    // const permanentState = items["bms/cfg/permanent_state"]["value"];
+
+    if (!KVS["bms/cfg/default_lock_state"] || !KVS["bms/cfg/default_lock_state"]["value"]) {
+        return;
+    }
+    if (!KVS["bms/cfg/timeout"] || !KVS["bms/cfg/timeout"]["value"]) {
+        return;
+    }
+    if (!KVS["bms/cfg/input"]) {
+        return;
+    }
+
+    const timeout = KVS["bms/cfg/timeout"].value;
+    const defaultLockState = KVS["bms/cfg/default_lock_state"].value
+    const input = KVS["bms/cfg/input"].value;
+
+    print(timeout, defaultLockState, input)
+
+    print("Switching")
+
+    Shelly.call("Switch.Set", {
+        id: input,
+        on: defaultLockState === "CLOSED",
+        toggle_after: timeout || 5
     })
 }
 
-function dispatchStatus(status)
-{
-    if(status.component === "sys")
-    {
-        enqueueShellyCall("KVS.GetMany", {}, onGotKVSOnDispatchStatus)
+function onGotKVSOnDispatchStatus(result) {
+    // const KVS = result.items
+
+    // function handleKVSChange(key, callback) {
+    //     const newValue = KVS[key] ? KVS[key].value : null
+    //     if (prevKVS[key] !== newValue) {
+    //         prevKVS[key] = newValue
+
+    //         callback(newValue)
+    //     }
+    // }
+
+}
+
+function dispatchStatus(status) {
+    print("============================================Status: ", JSON.stringify(status));
+    if (status.component === "ws") {
+        if (status.delta.connected) {
+            wsConnected.current = true
+        }
+
+        return
+    }
+
+    if (status.component === "sys") {
+        //enqueueShellyCall("KVS.GetMany", {}, onGotKVSOnDispatchStatus)
     }
 }
 
-function init()
+function configureWiFi() {
+    Shelly.call("WiFi.SetConfig", {
+        config: {
+            ap: {
+                enable: true
+            }
+        }
+    })
+}
+
+function HTTPGetBackendConnectionStatus(request, response)
 {
+    const status = Shelly.getComponentStatus("Ws")
+
+    response.code = 200
+    response.body = JSON.stringify({
+        isConnected: status.connected
+    })
+
+    response.send()
+}
+
+function parseQuery(query)
+{
+    const items = query.split("&")
+
+    const result = {}
+
+    for(let i in items)
+    {
+        const keyValue = items[i].split("=")
+        result[keyValue[0]] = keyValue[1]
+    }
+
+    return result
+}
+
+function HTTPPostOpenRelayWithCard(request, response)
+{
+    const query = parseQuery(request.query)
+    print("=====================Read card: ")
+    print(JSON.stringify(query))
+    enqueueShellyCall("KVS.GetMany", {}, function (result) {
+        onReadCard(query.cardId, result.items)
+    })
+
+    response.code = 200
+    response.body = ""
+
+    response.send()
+
+}
+
+function setupHTTPServer()
+{
+    HTTPServer.registerEndpoint("backend_connection_status", HTTPGetBackendConnectionStatus)
+    HTTPServer.registerEndpoint("open_relay_with_rfid", HTTPPostOpenRelayWithCard)
+}
+
+
+function init() {
     Shelly.addEventHandler(dispatchEvent)
     Shelly.addStatusHandler(dispatchStatus)
+
+    configureWiFi()
+    setupHTTPServer()
 }
 
 init()

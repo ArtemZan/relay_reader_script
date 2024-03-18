@@ -3,7 +3,7 @@ const prevKVS = {}
 
 const shellyCallsQueue = []
 
-const wsConnected = {current: false}
+const wsConnected = { current: false }
 
 function callNext() {
     const call = shellyCallsQueue[0]
@@ -52,26 +52,7 @@ function dispatchEvent(event) {
     }
 }
 
-function onReadCard(card_id, KVS) {
-    const cardKVSEntry = KVS["bms/i/" + card_id]
-    if (!cardKVSEntry) {
-        return
-    }
-
-    
-    const expirationTime = cardKVSEntry.value
-    print(expirationTime)
-
-    const currTime = Shelly.getComponentStatus("sys").unixtime;
-    if (expirationTime && expirationTime < currTime) {
-        return;
-    }
-
-    // if (items["bms/cfg/permanent_state"] === undefined || items["bms/cfg/permanent_state"]["value"] === undefined) {
-    //     return;
-    // }
-    // const permanentState = items["bms/cfg/permanent_state"]["value"];
-
+function turnTheSwitch(KVS) {
     if (!KVS["bms/cfg/default_lock_state"] || !KVS["bms/cfg/default_lock_state"]["value"]) {
         return;
     }
@@ -97,17 +78,49 @@ function onReadCard(card_id, KVS) {
     })
 }
 
-function onGotKVSOnDispatchStatus(result) {
-    // const KVS = result.items
+function onReadCard(card_id, KVS) {
+    const cardKVSEntry = KVS["bms/i/" + card_id]
+    if (!cardKVSEntry) {
+        return
+    }
 
-    // function handleKVSChange(key, callback) {
-    //     const newValue = KVS[key] ? KVS[key].value : null
-    //     if (prevKVS[key] !== newValue) {
-    //         prevKVS[key] = newValue
 
-    //         callback(newValue)
-    //     }
+    const expirationTime = cardKVSEntry.value
+    print(expirationTime)
+
+    const currTime = Shelly.getComponentStatus("sys").unixtime;
+    if (expirationTime && expirationTime < currTime) {
+        return;
+    }
+
+    // if (items["bms/cfg/permanent_state"] === undefined || items["bms/cfg/permanent_state"]["value"] === undefined) {
+    //     return;
     // }
+    // const permanentState = items["bms/cfg/permanent_state"]["value"];
+
+    turnTheSwitch(KVS)
+}
+
+function onGotKVSOnDispatchStatus(result) {
+    const KVS = result.items
+
+    function handleKVSChange(key, callback) {
+        const newValue = KVS[key] ? KVS[key].value : null
+        if (prevKVS[key] !== newValue) {
+            prevKVS[key] = newValue
+
+            callback(newValue)
+        }
+    }
+
+    function onAccepted(value) {
+        if (value) {
+            turnTheSwitch(KVS)
+            enqueueShellyCall("KVS.Delete", { key: "accepted" })
+        }
+    }
+
+    handleKVSChange("accepted", onAccepted)
 
 }
 
@@ -122,7 +135,7 @@ function dispatchStatus(status) {
     }
 
     if (status.component === "sys") {
-        //enqueueShellyCall("KVS.GetMany", {}, onGotKVSOnDispatchStatus)
+        enqueueShellyCall("KVS.GetMany", {}, onGotKVSOnDispatchStatus)
     }
 }
 
@@ -136,8 +149,7 @@ function configureWiFi() {
     })
 }
 
-function HTTPGetBackendConnectionStatus(request, response)
-{
+function HTTPGetBackendConnectionStatus(request, response) {
     const status = Shelly.getComponentStatus("Ws")
 
     response.code = 200
@@ -148,14 +160,12 @@ function HTTPGetBackendConnectionStatus(request, response)
     response.send()
 }
 
-function parseQuery(query)
-{
+function parseQuery(query) {
     const items = query.split("&")
 
     const result = {}
 
-    for(let i in items)
-    {
+    for (let i in items) {
         const keyValue = items[i].split("=")
         result[keyValue[0]] = keyValue[1]
     }
@@ -163,8 +173,7 @@ function parseQuery(query)
     return result
 }
 
-function HTTPPostOpenRelayWithCard(request, response)
-{
+function HTTPPostOpenRelayWithCard(request, response) {
     const query = parseQuery(request.query)
     print("=====================Read card: ")
     print(JSON.stringify(query))
@@ -179,8 +188,7 @@ function HTTPPostOpenRelayWithCard(request, response)
 
 }
 
-function setupHTTPServer()
-{
+function setupHTTPServer() {
     HTTPServer.registerEndpoint("backend_connection_status", HTTPGetBackendConnectionStatus)
     HTTPServer.registerEndpoint("open_relay_with_rfid", HTTPPostOpenRelayWithCard)
 }

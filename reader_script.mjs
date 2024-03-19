@@ -16,6 +16,10 @@ const shellyCallsQueue = []
 
 const wifiReconnectAttemptsLeft = { current: 3 }
 
+const relayServerScriptId = {current: null}
+
+const relayIP = "192.168.33.1"
+
 function callNext() {
     const call = shellyCallsQueue[0]
     if (!call) {
@@ -58,7 +62,7 @@ function sendHTTPWithAuth(method, relative_uri, KVS, data, callback) {
         return
     }
 
-    const url = "http://admin:" + KVS.relay_password.value + "@" + (KVS.relay_url ? KVS.relay_url.value : "") + relative_uri
+    const url = "http://admin:" + KVS.relay_password.value + "@" + relayIP + "/script/" + relayServerScriptId.current + relative_uri
 
     const dataCopy = JSON.parse(JSON.stringify(data))
     dataCopy.url = url
@@ -166,6 +170,7 @@ function checkWifiStatus(select_main_if_disconnected) {
                 setWSConnectTimer()
             }
             else {
+                getrelayServerScriptId()
                 setBackendConnectionChecker()
             }
 
@@ -233,9 +238,12 @@ function dispatchEvent(event) {
         return
     }
 
-    // if (eventName === "sta_ip_acquired") {
-    //     return
-    // }
+    if (eventName === "sta_ip_acquired") {
+        if (connectedAP.current === "relay_AP") {
+            getrelayServerScriptId()
+        }
+        return
+    }
 
     if (eventName === "sta_connected") {
         checkWifiStatus()
@@ -411,6 +419,39 @@ function setBackendConnectionChecker() {
     }
 
     wifiCheckTimerHandler.current = Timer.set(60_000, true, check)
+}
+
+// Looks for a script named "readers", which is running on the relay, and stores it in relayServerScriptId
+function getrelayServerScriptId()
+{
+    function onGotScripts(response)
+    {
+        console.log("Got scripts: ", response)
+        if (!response || !response.body) {
+            print("No body in the response")
+            return
+        }
+
+        const body = JSON.parse(response.body)
+
+        print(body)
+
+        const scripts = body.scripts
+
+        for(let i in scripts)
+        {
+            if(scripts[i].name === "readers")
+            {
+                relayServerScriptId.current = scripts[i].id
+            }
+        }
+    }
+
+    enqueueShellyCall("KVS.Get", {key: "relay_password"}, function (relay_password) {
+        enqueueShellyCall("HTTP.GET", {
+            url: "http://admin:" + relay_password.value + "@" + "192.168.33.1/rpc/Script.List"
+        }, onGotScripts)
+    })
 }
 
 function init() {

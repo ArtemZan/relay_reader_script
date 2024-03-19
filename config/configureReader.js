@@ -54,7 +54,7 @@ async function init()
         key: "relay_AP",
         value: `{
             "ssid": "${CMDparams.relayAPSSID}",
-            "pass": "${CMDparams.relayAPPassword}"
+            "pass": "${CMDparams.relayAPPassword || ""}"
         }`
     })
 

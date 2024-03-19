@@ -113,19 +113,6 @@ RPC command: KVS.Set
 ```
 
 &nbsp;
-### Relay url
-
-```
-RPC command: KVS.Set
-```
-```json
-{
-    "key": "relay_url",
-    "value": "http://192.168.33.1/script/{script_id}"
-}
-```
-
-&nbsp;
 ### Relay password
 
 ```

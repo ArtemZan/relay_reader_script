@@ -65,10 +65,12 @@ Shelly.SetAuth - https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices
 
 
 ### Authentication
+Set from backend
 Shelly.SetAuth - https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellysetauth
 
 &nbsp;
 ### Wifi
+Set from mobile apps
 
 The reader will try to connect to `"relay_AP"` if connection to `"wifi"` couldn't be establshed.
 
@@ -87,6 +89,8 @@ RPC command: KVS.Set
 
 &nbsp;
 ### Relay AP
+Set from backend
+
 ```
 RPC command: KVS.Set
 ```
@@ -102,6 +106,8 @@ RPC command: KVS.Set
 
 &nbsp;
 ### Websocket server
+Set from mobile apps
+
 ```
 RPC command: KVS.Set
 ```
@@ -114,6 +120,7 @@ RPC command: KVS.Set
 
 &nbsp;
 ### Relay password
+Set from backend
 
 ```
 RPC command: KVS.Set

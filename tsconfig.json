@@ -1,0 +1,18 @@
+{
+    "buildOptions": {
+
+    },
+    "compilerOptions": {
+        "target": "ES5",
+        "lib": [],
+        "noImplicitAny": true
+    },
+    "include": [
+        "./src",
+        "./lib.esshelly.d.ts", 
+        "shelly.d.ts"
+    ],
+    "exclude": [
+        "*/lib.dom.d.ts"
+    ]
+}

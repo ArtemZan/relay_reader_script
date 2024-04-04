@@ -14,9 +14,11 @@ const wifiCheckTimerHandler = { current: null }
 
 const shellyCallsQueue = []
 
-const wifiReconnectAttemptsLeft = { current: 3 }
+const wifiReconnectAttempts = 1
+const wifiReconnectAttemptsLeft = { current: wifiReconnectAttempts }
+const wifiDisconnectedForSwitching = { current: false }
 
-const relayServerScriptId = {current: null}
+const relayServerScriptId = { current: null }
 
 const relayIP = "192.168.33.1"
 
@@ -70,8 +72,16 @@ function sendHTTPWithAuth(method, relative_uri, KVS, data, callback) {
     Shelly.call(method, dataCopy, callback)
 }
 
+function hasRelayAP(callback) {
+    enqueueShellyCall("KVS.Get", { key: "relay_AP" }, function (result) {
+        callback(!!result && !!result.value)
+    })
+}
+
 // Switch when still connected to a network
 function forceSwitchWifi() {
+    wifiDisconnectedForSwitching.current = true
+
     // Simply disable the current STA. On "sta_disconnected" the network will be switched (see function 'dispatchEvent')
     enqueueShellyCall("WiFi.SetConfig", {
         config: {
@@ -108,7 +118,7 @@ function selectWiFiNetwork(config) {
 }
 
 function selectMainNetwork() {
-    enqueueShellyCall("KVS.Get", { "key": "wifi" }, function (main_wifi) {
+    enqueueShellyCall("KVS.Get", { key: "wifi" }, function (main_wifi) {
         print("Main Wifi: ", main_wifi.value);
 
         try {
@@ -122,6 +132,8 @@ function selectMainNetwork() {
 
 function switchWiFiNetwork() {
     const wifiConfig = Shelly.getComponentConfig("WiFi")
+
+    wifiDisconnectedForSwitching.current = false
 
     function onGotNetworks(main_wifi, relay_AP) {
         if (wifiConfig.sta.ssid == main_wifi.ssid) {
@@ -170,7 +182,7 @@ function checkWifiStatus(select_main_if_disconnected) {
                 setWSConnectTimer()
             }
             else {
-                getrelayServerScriptId()
+                getRelayServerScriptId()
                 setBackendConnectionChecker()
             }
 
@@ -193,14 +205,20 @@ function setWSConnectTimer() {
         Timer.clear(wsTimerHandler.current)
     }
 
-    wsTimerHandler.current = Timer.set(60 * 1000, false, function () {
+    function onTimeOut() {
         const status = Shelly.getComponentStatus("Ws")
         console.log("WS time passed. Status: ", JSON.stringify(status))
         if (!status.connected) {
             print("WS connection timed out after 1 minute. Switching to the other wifi network.")
-            forceSwitchWifi()
+            hasRelayAP(function (hasRelayAP) {
+                if (hasRelayAP) {
+                    forceSwitchWifi()
+                }
+            })
         }
-    })
+    }
+
+    wsTimerHandler.current = Timer.set(60 * 1000, false, onTimeOut)
 }
 
 function dispatchEvent(event) {
@@ -211,19 +229,21 @@ function dispatchEvent(event) {
     print(eventName)
 
 
-    if(eventName === "sta_connect_fail")
-    {
+    if (eventName === "sta_connect_fail") {
         wifiReconnectAttemptsLeft.current--
-        if(wifiReconnectAttemptsLeft.current <= 0)
-        {
-            wifiReconnectAttemptsLeft.current = 3
+        if (wifiReconnectAttemptsLeft.current <= 0) {
+            wifiReconnectAttemptsLeft.current = wifiReconnectAttempts
             switchWiFiNetwork()
         }
     }
 
-    if(eventName === "sta_disconnected")
-    {
-        wifiReconnectAttemptsLeft.current = 3
+    if (eventName === "sta_disconnected") {
+        if (event.info.reason === 8 && !wifiDisconnectedForSwitching.current) {
+            return
+        }
+
+        wifiReconnectAttemptsLeft.current = wifiReconnectAttempts
+        
         switchWiFiNetwork()
     }
 
@@ -234,13 +254,13 @@ function dispatchEvent(event) {
             wifiCheckTimerHandler.current = null
         }
 
-        
+
         return
     }
 
     if (eventName === "sta_ip_acquired") {
         if (connectedAP.current === "relay_AP") {
-            getrelayServerScriptId()
+            getRelayServerScriptId()
         }
         return
     }
@@ -384,7 +404,7 @@ function updateWSConfig() {
 function setBackendConnectionChecker() {
     function onGotKVS(result) {
         const KVS = result.items
-        
+
         sendHTTPWithAuth("HTTP.GET", "/backend_connection_status", KVS, {}, function (response) {
             print("Got response from GET /backend_connection_status: ", JSON.stringify(response))
             if (!response || !response.body_b64) {
@@ -392,7 +412,14 @@ function setBackendConnectionChecker() {
                 return
             }
 
-            const body = JSON.parse(atob(response.body_b64))
+            let body
+            try {
+                body = JSON.parse(atob(response.body_b64))
+            }
+            catch (e) {
+                print("Failed to parse response body")
+                return
+            }
 
             print(body)
 
@@ -422,11 +449,13 @@ function setBackendConnectionChecker() {
 }
 
 // Looks for a script named "readers", which is running on the relay, and stores it in relayServerScriptId
-function getrelayServerScriptId()
-{
-    function onGotScripts(response)
-    {
-        console.log("Got scripts: ", response)
+function getRelayServerScriptId() {
+    if (relayServerScriptId.current) {
+        return
+    }
+
+    function onGotScripts(response) {
+        print("Got scripts: ", response)
         if (!response || !response.body) {
             print("No body in the response")
             return
@@ -438,16 +467,14 @@ function getrelayServerScriptId()
 
         const scripts = body.scripts
 
-        for(let i in scripts)
-        {
-            if(scripts[i].name === "readers")
-            {
+        for (let i in scripts) {
+            if (scripts[i].name === "readers") {
                 relayServerScriptId.current = scripts[i].id
             }
         }
     }
 
-    enqueueShellyCall("KVS.Get", {key: "relay_password"}, function (relay_password) {
+    enqueueShellyCall("KVS.Get", { key: "relay_password" }, function (relay_password) {
         enqueueShellyCall("HTTP.GET", {
             url: "http://admin:" + relay_password.value + "@" + "192.168.33.1/rpc/Script.List"
         }, onGotScripts)

@@ -1,11 +1,18 @@
 {
     "buildOptions": {
-
+        
     },
     "compilerOptions": {
         "target": "ES5",
         "lib": [],
-        "noImplicitAny": true
+        "noImplicitAny": true,
+        "removeComments": true,
+        // "skipDefaultLibCheck": true,
+        // "skipLibCheck": true
+        "noEmitOnError": true,
+        "outDir": "build",
+        // "outFile": "build.js",
+        // "module": "System"
     },
     "include": [
         "./src",

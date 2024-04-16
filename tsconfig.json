@@ -4,19 +4,20 @@
     },
     "compilerOptions": {
         "target": "ES5",
-        "lib": [],
+        // "noLib": true,
         "noImplicitAny": true,
         "removeComments": true,
-        // "skipDefaultLibCheck": true,
+        "skipDefaultLibCheck": true,
         // "skipLibCheck": true
+        "rootDir": "src",
         "noEmitOnError": true,
         "outDir": "build",
-        // "outFile": "build.js",
-        // "module": "System"
+        "outFile": "build.js",
+        "module": "System",
     },
     "include": [
         "./src",
-        "./lib.esshelly.d.ts", 
+        "src/esshelly.ts", 
         "shelly.d.ts"
     ],
     "exclude": [

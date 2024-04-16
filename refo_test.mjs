@@ -243,7 +243,7 @@ function dispatchEvent(event) {
         }
 
         wifiReconnectAttemptsLeft.current = wifiReconnectAttempts
-        
+
         switchWiFiNetwork()
     }
 
@@ -335,28 +335,43 @@ function dispatchStatus(status) {
 
 function handleRFIDRead(tag) {
     print("Scan card: ", tag);
+    RFIDScanner.stop();
 
-    if (connectedAP.current === null) {
-        print("The read card is ignored as the reader is not connected to wifi")
-        return
+
+    try {
+        if (connectedAP.current === null) {
+            print("The read card is ignored as the reader is not connected to wifi")
+            return
+        }
+
+        function onGotKVS(result) {
+            const KVS = result.items
+
+            sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {})
+
+        }
+
+
+
+        if (connectedAP.current === "relay_AP") {
+            Shelly.call("KVS.GetMany", {}, onGotKVS)
+        }
+        else {
+
+            // TO DO: don't notify all RPC channels
+            Shelly.emitEvent("card_read", {
+                cardId: tag
+            })
+        }
+    }
+    catch (e) {
+        console.log(e)
     }
 
-    function onGotKVS(result) {
-        const KVS = result.items
-
-        sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {})
-
-    }
-
-    if (connectedAP.current === "relay_AP") {
-        Shelly.call("KVS.GetMany", {}, onGotKVS)
-    }
-    else {
-        // TO DO: don't notify all RPC channels
-        Shelly.emitEvent("card_read", {
-            cardId: tag
-        })
-    }
+    Timer.set(100, false, function () {
+        print("Start rfid after timeout");
+        RFIDScanner.start(handleRFIDRead);
+    })
 }
 
 

@@ -29,8 +29,8 @@ function init()
     Shelly.call("Wifi.SetConfig", {
         config: {
             sta: {
-                ssid: "Artem",
-                pass: "12345678",
+                ssid: "ShellyPlus1-80646FDB2A7C",
+                pass: "",
                 enable: true
             }
         }

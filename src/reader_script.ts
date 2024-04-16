@@ -1,24 +1,33 @@
+
+
 // Used to detect changes in KVS
-const prevKVS = {}
+const prevKVS: KVS = {}
+
+
+type Ref<T = any> = {
+    current: T
+}
 
 // Possible values: 
 // null - disconnected
 // "wifi"
 // "relay_AP"
-let connectedAP = { current: null }
+let connectedAP: Ref = { current: null }
 
-let switchingWifi = { current: false }
+let switchingWifi: Ref = { current: false }
 
-const wsTimerHandler = { current: null }
-const wifiCheckTimerHandler = { current: null }
+const wsTimerHandler: Ref = { current: null }
+const wifiCheckTimerHandler: Ref = { current: null }
 
-const shellyCallsQueue = []
+type ShellyCall = [Shelly.Method, any, Shelly.MethodCallback]
+
+const shellyCallsQueue: ShellyCall[] = []
 
 const wifiReconnectAttempts = 1
 const wifiReconnectAttemptsLeft = { current: wifiReconnectAttempts }
 const wifiDisconnectedForSwitching = { current: false }
 
-const relayServerScriptId = { current: null }
+const relayServerScriptId: Ref = { current: null }
 
 const relayIP = "192.168.33.1"
 
@@ -28,7 +37,7 @@ function callNext() {
         return
     }
 
-    function onComplete(result) {
+    function onComplete(result: any) {
         print("onComplete")
 
         if (call[2]) {
@@ -37,7 +46,7 @@ function callNext() {
                 call[2](result)
             }
             catch (e) {
-                console.log("Shelly call caught an error: ", e)
+                print("Shelly call caught an error: ", e)
             }
         }
 
@@ -50,7 +59,7 @@ function callNext() {
     Shelly.call(call[0], call[1], onComplete)
 }
 
-function enqueueShellyCall(method, params, callback) {
+function enqueueShellyCall(method: Shelly.Method, params?: any, callback?: Shelly.MethodCallback) {
     shellyCallsQueue.push([method, params, callback])
 
     if (shellyCallsQueue.length === 1) {
@@ -58,7 +67,7 @@ function enqueueShellyCall(method, params, callback) {
     }
 }
 
-function sendHTTPWithAuth(method, relative_uri, KVS, data, callback) {
+function sendHTTPWithAuth(method: `HTTP.${HTTPServer.Method}`, relative_uri: string, KVS: KVS, data: any, callback?: (response: HTTPServer.Response) => void) {
     if (!KVS.relay_password) {
         print("No password")
         return
@@ -72,7 +81,7 @@ function sendHTTPWithAuth(method, relative_uri, KVS, data, callback) {
     Shelly.call(method, dataCopy, callback)
 }
 
-function hasRelayAP(callback) {
+function hasRelayAP(callback: (result: boolean) => void) {
     enqueueShellyCall("KVS.Get", { key: "relay_AP" }, function (result) {
         callback(!!result && !!result.value)
     })
@@ -83,7 +92,7 @@ function forceSwitchWifi() {
     wifiDisconnectedForSwitching.current = true
 
     // Simply disable the current STA. On "sta_disconnected" the network will be switched (see function 'dispatchEvent')
-    enqueueShellyCall("WiFi.SetConfig", {
+    enqueueShellyCall("Wifi.SetConfig", {
         config: {
             sta: {
                 enable: false
@@ -92,13 +101,15 @@ function forceSwitchWifi() {
     })
 }
 
-function selectWiFiNetwork(config) {
+type WifiConfig = {ssid: string, pass: string}
+
+function selectWiFiNetwork(config: WifiConfig) {
     if (switchingWifi.current) {
         return
     }
 
     switchingWifi.current = true
-    enqueueShellyCall("WiFi.SetConfig", {
+    enqueueShellyCall("Wifi.SetConfig", {
         config: {
             sta: {
                 ssid: config.ssid,
@@ -118,7 +129,7 @@ function selectWiFiNetwork(config) {
 }
 
 function selectMainNetwork() {
-    enqueueShellyCall("KVS.Get", { key: "wifi" }, function (main_wifi) {
+    enqueueShellyCall("KVS.Get", { key: "wifi" }, (main_wifi) => {
         print("Main Wifi: ", main_wifi.value);
 
         try {
@@ -131,11 +142,11 @@ function selectMainNetwork() {
 }
 
 function switchWiFiNetwork() {
-    const wifiConfig = Shelly.getComponentConfig("WiFi")
+    const wifiConfig = Shelly.getComponentConfig("Wifi")
 
     wifiDisconnectedForSwitching.current = false
 
-    function onGotNetworks(main_wifi, relay_AP) {
+    function onGotNetworks(main_wifi: WifiConfig, relay_AP: WifiConfig) {
         if (wifiConfig.sta.ssid == main_wifi.ssid) {
             selectWiFiNetwork(relay_AP)
         }
@@ -144,7 +155,7 @@ function switchWiFiNetwork() {
         }
     }
 
-    function onGotMainWifi(main_wifi) {
+    function onGotMainWifi(main_wifi: {value: string}) {
         enqueueShellyCall("KVS.Get", { "key": "relay_AP" }, function (relay_AP) {
             print("Wifi: ", main_wifi.value, relay_AP.value);
             try {
@@ -159,8 +170,8 @@ function switchWiFiNetwork() {
     enqueueShellyCall("KVS.Get", { "key": "wifi" }, onGotMainWifi)
 }
 
-function checkWifiStatus(select_main_if_disconnected) {
-    const wifiStatus = Shelly.getComponentStatus("WiFi")
+function checkWifiStatus(select_main_if_disconnected?: boolean) {
+    const wifiStatus = Shelly.getComponentStatus("Wifi")
     print("Got wifi status: ", JSON.stringify(wifiStatus))
 
     if (wifiStatus.ssid === null) {
@@ -172,7 +183,7 @@ function checkWifiStatus(select_main_if_disconnected) {
     }
 
 
-    function onGotWiFiUrl(result) {
+    function onGotWiFiUrl(result: {value: string}) {
         try {
             const wifiSSID = JSON.parse(result.value).ssid
 
@@ -206,7 +217,7 @@ function setWSConnectTimer() {
     }
 
     function onTimeOut() {
-        const status = Shelly.getComponentStatus("Ws")
+        const status = Shelly.getComponentStatus("WS")
         console.log("WS time passed. Status: ", JSON.stringify(status))
         if (!status.connected) {
             print("WS connection timed out after 1 minute. Switching to the other wifi network.")
@@ -221,7 +232,7 @@ function setWSConnectTimer() {
     wsTimerHandler.current = Timer.set(60 * 1000, false, onTimeOut)
 }
 
-function dispatchEvent(event) {
+function dispatchEvent(event: Shelly.Event) {
     print("============================================Event: ");
     print(JSON.stringify(event))
 
@@ -275,10 +286,10 @@ function dispatchEvent(event) {
 
 }
 
-function onGotKVSOnDispatchStatus(result) {
+function onGotKVSOnDispatchStatus(result: {items: KVS}) {
     const KVS = result.items
 
-    function handleKVSChange(key, callback) {
+    function handleKVSChange(key: string, callback: (newValue: string) => void) {
         const newValue = KVS[key] ? KVS[key].value : null
         if (prevKVS[key] !== newValue) {
             prevKVS[key] = newValue
@@ -313,7 +324,7 @@ function onGotKVSOnDispatchStatus(result) {
     })
 }
 
-function dispatchStatus(status) {
+function dispatchStatus(status: Shelly.StatusChangeEvent) {
     print("Status change: ", JSON.stringify(status))
 
     if (status.component === "ws") {
@@ -333,7 +344,7 @@ function dispatchStatus(status) {
 }
 
 
-function handleRFIDRead(tag) {
+function handleRFIDRead(tag: string) {
     print("Scan card: ", tag);
 
     if (connectedAP.current === null) {
@@ -341,28 +352,56 @@ function handleRFIDRead(tag) {
         return
     }
 
-    function onGotKVS(result) {
+    RFIDScanner.stop()
+
+    function onGotRelayUnlockResponse(response: HTTPServer.Response)
+    {
+        
+        console.log(response)
+        RFIDScanner.start(handleRFIDRead)
+    }
+
+    function onGotKVS(result: {items: KVS}) {
         const KVS = result.items
 
-        sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {})
+        sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {}, onGotRelayUnlockResponse)
 
+    }
+
+    function onGotUnlockResponseFromBackend(response: HTTPServer.Response)
+    {
+        print("Got response: ", response)
+        RFIDScanner.start(handleRFIDRead)
+    }
+
+    function onGotDeviceInfo(result: any)
+    {
+        const HTTPServerUrl = "https://shac.infn.dev/api"
+
+        print(result)
+        const mac = result.mac
+
+        Shelly.call("HTTP.POST", {
+            url: HTTPServerUrl + "/doors/open",
+            body: JSON.stringify({
+                cardId: tag,
+                readerMac: mac
+            })
+        }, onGotUnlockResponseFromBackend)
     }
 
     if (connectedAP.current === "relay_AP") {
         Shelly.call("KVS.GetMany", {}, onGotKVS)
     }
     else {
-        // TO DO: don't notify all RPC channels
-        Shelly.emitEvent("card_read", {
-            cardId: tag
-        })
+        Shelly.call("Shelly.GetDeviceInfo", {}, onGotDeviceInfo)
     }
 }
 
 
 
 function updateWSConfig() {
-    function onUpdateConfig(result, error_code, error_message) {
+    function onUpdateConfig(result: any, error_code?: number, error_message?: string) {
         if (!result) {
             print("Failed to update ws config: ", error_message)
             return
@@ -373,9 +412,9 @@ function updateWSConfig() {
         }
     }
 
-    function setWSUrl(url) {
+    function setWSUrl(url: string) {
         print("Use ws server: ", url)
-        enqueueShellyCall("Ws.SetConfig", {
+        enqueueShellyCall("WS.SetConfig", {
             config: {
                 server: url,
                 ssl_ca: "*",
@@ -384,7 +423,7 @@ function updateWSConfig() {
         }, onUpdateConfig)
     }
 
-    function onGotServerUrl(result, error_code, error_message) {
+    function onGotServerUrl(result: any, error_code?: number, error_message?: string) {
         if (error_code || !result) {
             print("Abort ws connection, couldn't take ws url from KVS: ", error_message)
             return
@@ -402,10 +441,10 @@ function updateWSConfig() {
 }
 
 function setBackendConnectionChecker() {
-    function onGotKVS(result) {
+    function onGotKVS(result: {items: KVS}) {
         const KVS = result.items
 
-        sendHTTPWithAuth("HTTP.GET", "/backend_connection_status", KVS, {}, function (response) {
+        sendHTTPWithAuth("HTTP.GET", "/backend_connection_status", KVS, {}, function (response: HTTPServer.Response) {
             print("Got response from GET /backend_connection_status: ", JSON.stringify(response))
             if (!response || !response.body_b64) {
                 print("No body in the response")
@@ -430,8 +469,8 @@ function setBackendConnectionChecker() {
     }
 
     function check() {
-        const wsStatus = Shelly.getComponentStatus("Ws")
-        const wifiStatus = Shelly.getComponentStatus("WiFi")
+        const wsStatus = Shelly.getComponentStatus("WS")
+        const wifiStatus = Shelly.getComponentStatus("Wifi")
 
         if (wsStatus.connected || !wifiStatus.ssid) {
             return
@@ -454,7 +493,7 @@ function getRelayServerScriptId() {
         return
     }
 
-    function onGotScripts(response) {
+    function onGotScripts(response: HTTPServer.Response) {
         print("Got scripts: ", response)
         if (!response || !response.body) {
             print("No body in the response")
@@ -503,3 +542,6 @@ function init() {
 
 
 init()
+
+
+export {}

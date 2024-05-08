@@ -352,13 +352,9 @@ function handleRFIDRead(tag: string) {
         return
     }
 
-    RFIDScanner.stop()
-
     function onGotRelayUnlockResponse(response: HTTPServer.Response)
     {
-        
         console.log(response)
-        RFIDScanner.start(handleRFIDRead)
     }
 
     function onGotKVS(result: {items: KVS}) {
@@ -368,37 +364,28 @@ function handleRFIDRead(tag: string) {
 
     }
 
-    function onGotUnlockResponseFromBackend(response: HTTPServer.Response)
-    {
-        print("Got response: ", response)
-        RFIDScanner.start(handleRFIDRead)
-    }
-
-    function onGotDeviceInfo(result: any)
-    {
-        const HTTPServerUrl = "https://shac.infn.dev/api"
-
-        print(result)
-        const mac = result.mac
-
-        Shelly.call("HTTP.POST", {
-            url: HTTPServerUrl + "/doors/open",
-            body: JSON.stringify({
-                cardId: tag,
-                readerMac: mac
-            })
-        }, onGotUnlockResponseFromBackend)
-    }
-
     if (connectedAP.current === "relay_AP") {
         Shelly.call("KVS.GetMany", {}, onGotKVS)
     }
     else {
-        Shelly.call("Shelly.GetDeviceInfo", {}, onGotDeviceInfo)
+        // TO DO: don't notify all RPC channels
+        Shelly.emitEvent("card_read", {
+            cardId: tag
+        })
     }
 }
 
+const enum UNLOCK_RESULT {
+    DOOR_UNLOCKED = "DOOR_UNLOCKED",
+    CARD_DECLINED = "DOOR_UNLOCKED",
+    CARD_ADDED = "DOOR_UNLOCKED"
 
+}
+
+function _onDoorUnlock(result: UNLOCK_RESULT){
+    print("Door unlock result: ", result);
+    // SHow LED/buzz indication
+}
 
 function updateWSConfig() {
     function onUpdateConfig(result: any, error_code?: number, error_message?: string) {

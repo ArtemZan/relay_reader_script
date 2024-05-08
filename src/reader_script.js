@@ -1,4 +1,3 @@
-
 // Used to detect changes in KVS
 var prevKVS = {};
 // Possible values: 
@@ -266,35 +265,26 @@ function handleRFIDRead(tag) {
         print("The read card is ignored as the reader is not connected to wifi");
         return;
     }
+    function onGotRelayUnlockResponse(response) {
+        console.log(response);
+    }
     function onGotKVS(result) {
         var KVS = result.items;
-        sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {});
-    }
-    function onGotUnlockResponse(response) {
-        print("Got response: ", response);
-    }
-    function onGotDeviceInfo(result) {
-        var HTTPServerUrl = "https://shac.infn.dev/api";
-        print(result);
-        var mac = result.mac;
-        Shelly.call("HTTP.POST", {
-            url: HTTPServerUrl + "/doors/open",
-            body: JSON.stringify({
-                cardId: tag,
-                readerMac: mac
-            })
-        }, onGotUnlockResponse);
+        sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {}, onGotRelayUnlockResponse);
     }
     if (connectedAP.current === "relay_AP") {
         Shelly.call("KVS.GetMany", {}, onGotKVS);
     }
     else {
-        Shelly.call("Shelly.GetDeviceInfo", {}, onGotDeviceInfo);
-        // // TO DO: don't notify all RPC channels
-        // Shelly.emitEvent("card_read", {
-        //     cardId: tag
-        // })
+        // TO DO: don't notify all RPC channels
+        Shelly.emitEvent("card_read", {
+            cardId: tag
+        });
     }
+}
+function _onDoorUnlock(result) {
+    print("Door unlock result: ", result);
+    // SHow LED/buzz indication
 }
 function updateWSConfig() {
     function onUpdateConfig(result, error_code, error_message) {

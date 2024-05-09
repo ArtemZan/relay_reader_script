@@ -164,7 +164,7 @@ function setWSConnectTimer() {
     }
     function onTimeOut() {
         var status = Shelly.getComponentStatus("WS");
-        console.log("WS time passed. Status: ", JSON.stringify(status));
+        print("WS time passed. Status: ", JSON.stringify(status));
         if (!status.connected) {
             print("WS connection timed out after 1 minute. Switching to the other wifi network.");
             hasRelayAP(function (hasRelayAP) {
@@ -266,7 +266,7 @@ function handleRFIDRead(tag) {
         return;
     }
     function onGotRelayUnlockResponse(response) {
-        console.log(response);
+        print(response);
     }
     function onGotKVS(result) {
         var KVS = result.items;
@@ -285,6 +285,71 @@ function handleRFIDRead(tag) {
 function _onDoorUnlock(result) {
     print("Door unlock result: ", result);
     // SHow LED/buzz indication
+    try {
+        switch (result) {
+            case "DOOR_UNLOCKED" /* DOOR_UNLOCKED */: {
+                // Play happy sound - G chord starting in 5th octave - and set color to green
+                RGBSet(0, 12, 0x00FF00);
+                Timer.set(150, false, function () {
+                    PWMSet(2, 587, 0.5);
+                });
+                Timer.set(200, false, function () {
+                    PWMSet(2, 784, 0.3);
+                    Timer.set(50, false, function () {
+                        PWMSet(2, 1175, 0.3);
+                    });
+                    Timer.set(100, false, function () {
+                        PWMSet(2, 1568, 0.3);
+                        Timer.set(150, false, function () {
+                            PWMSet(2, 0, 0.5);
+                            RGBSet(0, 12, 0x000000);
+                        });
+                    });
+                });
+                break;
+            }
+            case "DOOR_UNLOCKED" /* CARD_DECLINED */: {
+                // Play sad sound (single E note in the 4th octave) and set color to red
+                RGBSet(0, 12, 0xFF0000);
+                PWMSet(2, 330, 0.5);
+                Timer.set(200, false, function () {
+                    PWMSet(2, 0, 0);
+                });
+                Timer.set(250, false, function () {
+                    PWMSet(2, 330, 0.5);
+                    Timer.set(250, false, function () {
+                        PWMSet(2, 0, 0);
+                        RGBSet(0, 12, 0x000000);
+                    });
+                });
+                break;
+            }
+            case "DOOR_UNLOCKED" /* CARD_ADDED */: {
+                RGBSet(0, 12, 0xFFff00);
+                Timer.set(150, false, function () {
+                    PWMSet(2, 587, 0.5);
+                });
+                Timer.set(300, false, function () {
+                    PWMSet(2, 784, 0.3);
+                    Timer.set(150, false, function () {
+                        PWMSet(2, 1175, 0.3);
+                    });
+                    Timer.set(300, false, function () {
+                        PWMSet(2, 1568, 0.3);
+                    });
+                    Timer.set(600, false, function () {
+                        PWMSet(2, 0, 0.5);
+                        RGBSet(0, 12, 0x000000);
+                    });
+                });
+                break;
+            }
+        }
+    }
+    catch (e) {
+        print("Failed to indicate the result from reading card: ", e);
+        print("But the script is still alive");
+    }
 }
 function updateWSConfig() {
     function onUpdateConfig(result, error_code, error_message) {
@@ -381,7 +446,20 @@ function getRelayServerScriptId() {
         }, onGotScripts);
     });
 }
+function indicateInit() {
+    try {
+        RGBSet(0, 12, 0xffffff);
+        Timer.set(1000, false, function () {
+            RGBSet(0, 12, 0x000000);
+        });
+    }
+    catch (e) {
+        print("Failed to run 'indicateInit': ", e);
+        print("But the script is still alive");
+    }
+}
 function init() {
+    indicateInit();
     Shelly.call("KVS.GetMany", {}, function (result) {
         var keys = Object.keys(result.items);
         for (var i in keys) {

@@ -1,3 +1,5 @@
+"use strict";
+exports.__esModule = true;
 // Used to detect changes in KVS
 var prevKVS = {};
 // Possible values: 
@@ -251,6 +253,11 @@ function dispatchStatus(status) {
     if (status.component === "ws") {
         if (!status.delta.connected) {
             forceSwitchWifi();
+            enqueueShellyCall("WS.SetConfig", {
+                config: {
+                    enable: false
+                }
+            });
         }
         return;
     }

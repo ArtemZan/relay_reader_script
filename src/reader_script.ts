@@ -330,6 +330,11 @@ function dispatchStatus(status: Shelly.StatusChangeEvent) {
     if (status.component === "ws") {
         if (!status.delta.connected) {
             forceSwitchWifi()
+            enqueueShellyCall("WS.SetConfig", {
+                config: {
+                    enable: false
+                }
+            })
         }
 
         return

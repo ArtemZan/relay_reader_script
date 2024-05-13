@@ -381,8 +381,8 @@ function handleRFIDRead(tag: string) {
 
 const enum UNLOCK_RESULT {
     DOOR_UNLOCKED = "DOOR_UNLOCKED",
-    CARD_DECLINED = "DOOR_UNLOCKED",
-    CARD_ADDED = "DOOR_UNLOCKED"
+    CARD_DECLINED = "CARD_DECLINED",
+    CARD_ADDED = "CARD_ADDED"
 
 }
 

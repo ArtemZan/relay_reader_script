@@ -1,5 +1,3 @@
-"use strict";
-exports.__esModule = true;
 // Used to detect changes in KVS
 var prevKVS = {};
 // Possible values: 
@@ -294,7 +292,7 @@ function _onDoorUnlock(result) {
     // SHow LED/buzz indication
     try {
         switch (result) {
-            case "DOOR_UNLOCKED" /* DOOR_UNLOCKED */: {
+            case "DOOR_UNLOCKED" /* UNLOCK_RESULT.DOOR_UNLOCKED */: {
                 // Play happy sound - G chord starting in 5th octave - and set color to green
                 RGBSet(0, 12, 0x00FF00);
                 Timer.set(150, false, function () {
@@ -315,7 +313,7 @@ function _onDoorUnlock(result) {
                 });
                 break;
             }
-            case "DOOR_UNLOCKED" /* CARD_DECLINED */: {
+            case "CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */: {
                 // Play sad sound (single E note in the 4th octave) and set color to red
                 RGBSet(0, 12, 0xFF0000);
                 PWMSet(2, 330, 0.5);
@@ -331,7 +329,7 @@ function _onDoorUnlock(result) {
                 });
                 break;
             }
-            case "DOOR_UNLOCKED" /* CARD_ADDED */: {
+            case "CARD_ADDED" /* UNLOCK_RESULT.CARD_ADDED */: {
                 RGBSet(0, 12, 0xFFff00);
                 Timer.set(150, false, function () {
                     PWMSet(2, 587, 0.5);

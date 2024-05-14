@@ -85,7 +85,7 @@ function turnTheSwitch(KVS: KVS) {
 function onReadCard(card_id: string, KVS: KVS) {
     const cardKVSEntry = KVS["bms/i/" + card_id]
     if (!cardKVSEntry) {
-        return
+        return UNLOCK_RESULT.CARD_DECLINED
     }
 
 
@@ -94,7 +94,7 @@ function onReadCard(card_id: string, KVS: KVS) {
 
     const currTime = Shelly.getComponentStatus("Sys").unixtime;
     if (expirationTime && expirationTime < currTime) {
-        return;
+        return UNLOCK_RESULT.CARD_DECLINED
     }
 
     // if (items["bms/cfg/permanent_state"] === undefined || items["bms/cfg/permanent_state"]["value"] === undefined) {
@@ -103,6 +103,8 @@ function onReadCard(card_id: string, KVS: KVS) {
     // const permanentState = items["bms/cfg/permanent_state"]["value"];
 
     turnTheSwitch(KVS)
+
+    return UNLOCK_RESULT.DOOR_UNLOCKED
 }
 
 function onGotKVSOnDispatchStatus(result: {items: KVS}) {
@@ -153,6 +155,7 @@ function configureWiFi() {
     })
 }
 
+
 function HTTPGetBackendConnectionStatus(request: HTTPServer.Request, response: HTTPServer.Response) {
     const status = Shelly.getComponentStatus("WS")
 
@@ -177,18 +180,27 @@ function parseQuery(query: string) {
     return result
 }
 
+const enum UNLOCK_RESULT {
+    DOOR_UNLOCKED = "DOOR_UNLOCKED",
+    CARD_DECLINED = "CARD_DECLINED",
+    CARD_ADDED = "CARD_ADDED"
+}
+
 function HTTPPostOpenRelayWithCard(request: HTTPServer.Request, response: HTTPServer.Response) {
     const query = parseQuery(request.query)
     print("=====================Read card: ")
     print(JSON.stringify(query))
     enqueueShellyCall("KVS.GetMany", {}, function (result) {
-        onReadCard(query.cardId, result.items)
+        const status = onReadCard(query.cardId, result.items)
+
+        response.code = 200
+        response.body = JSON.stringify({
+            status
+        })
+    
+        response.send()
     })
 
-    response.code = 200
-    response.body = ""
-
-    response.send()
 
 }
 

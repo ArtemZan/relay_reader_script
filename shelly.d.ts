@@ -4,9 +4,10 @@ declare namespace Shelly {
     type ComponentName = "Shelly" | "Sys" | "Switch" | "Wifi" | "WS" | "KVS" | "HTTP"
     type CommonCommangs = "GetConfig" | "SetConfig" | "GetStatus"
     type ComponentCommand = CommonCommangs | "Get" | "Set" | "Delete" | "GetMany" |
-        "Toggle" | "ResetCounters" |
-        "ListMethods" | "GetDeviceInfo" | "ListProfiles" | "SetProfile" | "Reboot" |
-        "GET" | "POST" | "Request"
+        "Toggle" | "ResetCounters" | // Switch
+        "ListMethods" | "GetDeviceInfo" | "ListProfiles" | "SetProfile" | "Reboot" | // Shelly
+        "GET" | "POST" | "Request" | // HTTP
+        "Scan" // Wifi
 
 
     type MethodG<ComponentNameT extends ComponentName, ComponentCommandT extends ComponentCommand> = `${ComponentNameT}.${ComponentCommandT}`
@@ -15,7 +16,8 @@ declare namespace Shelly {
         MethodG<"Shelly", "ListMethods"> | MethodG<"Shelly", "GetDeviceInfo"> | MethodG<"Shelly", "ListProfiles"> | MethodG<"Shelly", "SetProfile"> | MethodG<"Shelly", "Reboot"> |
         MethodG<"Switch", "Set"> | MethodG<"Switch", "Toggle"> | MethodG<"Switch", "ResetCounters"> |
         MethodG<"KVS", "Delete"> | MethodG<"KVS", "GetMany"> | MethodG<"KVS", "Get"> | MethodG<"KVS", "Set"> |
-        MethodG<"HTTP", "GET"> | MethodG<"HTTP", "POST"> | MethodG<"HTTP", "Request">
+        MethodG<"HTTP", "GET"> | MethodG<"HTTP", "POST"> | MethodG<"HTTP", "Request"> |
+        MethodG<"Wifi", "Scan">
 
     type MethodCallback = (result: any, error_code?: number, error_message?: string, userdata?: any) => void
 

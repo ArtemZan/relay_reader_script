@@ -14,6 +14,10 @@ const shellyCallsQueue: ShellyCall[] = []
 
 const relayServerScriptId: Ref = { current: null }
 
+const wsPingTimer: Ref<number> = {current: null}
+const wsPongReceived: Ref<boolean> = {current: true}
+const wsPingTimedOut: Ref<boolean> = {current: false}
+
 const relayIP = "192.168.33.1"
 
 function callNext() {
@@ -160,6 +164,21 @@ function dispatchEvent(event: Shelly.Event) {
 function dispatchStatus(status: Shelly.StatusChangeEvent) {
     print("Status change: ", JSON.stringify(status))
 
+    if(status.component === "ws" && status.delta.connected) {
+        wsPingTimedOut.current = false
+        wsPongReceived.current = true
+
+        wsPingTimer.current = Timer.set(10_000, true, () => {
+            if(!wsPongReceived.current) {
+                Timer.clear(wsPingTimer.current)
+                wsPingTimedOut.current = true
+                return
+            }
+
+            Shelly.emitEvent("ping", null)
+            wsPongReceived.current = false
+        })
+    }
 }
 
 
@@ -192,7 +211,7 @@ function handleRFIDRead(tag: string) {
 
     const wsStatus = Shelly.getComponentStatus("WS")
 
-    if (wsStatus.connected) {
+    if (wsStatus.connected && !wsPingTimedOut.current) {
         // TO DO: don't notify all through RPC channels
         Shelly.emitEvent("card_read", {
             cardId: tag
@@ -294,6 +313,10 @@ function _onDoorUnlock(result: UNLOCK_RESULT) {
         print("Failed to indicate the result from reading card: ", e);
         print("But the script is still alive");
     }
+}
+
+function _ping() {
+    wsPongReceived.current = true
 }
 
 // Looks for a script named "readers", which is running on the relay, and stores it in relayServerScriptId

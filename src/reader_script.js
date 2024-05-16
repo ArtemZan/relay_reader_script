@@ -1,13 +1,11 @@
-// Possible values: 
 // null - disconnected
-// "wifi"
-// "relay_AP"
 var connectedAP = { current: null };
 var shellyCallsQueue = [];
 var relayServerScriptId = { current: null };
 var wsPingTimer = { current: null };
 var wsPongReceived = { current: true };
 var wsPingTimedOut = { current: false };
+var scanningWifi = { current: false };
 var relayIP = "192.168.33.1";
 function callNext() {
     var call = shellyCallsQueue[0];
@@ -66,12 +64,21 @@ function checkWifiStatus() {
     }
 }
 function startScanningForRelayAP() {
+    if (connectedAP.current !== "wifi" || scanningWifi.current) {
+        return;
+    }
+    var wifiConfig = Shelly.getComponentConfig("Wifi");
+    if (!wifiConfig.sta.ssid) {
+        print("Sta is not set. Not scanning for wifi");
+        return;
+    }
+    scanningWifi.current = true;
     enqueueShellyCall("Wifi.Scan", null, function (result) {
         var networks = result.results;
-        var wifiConfig = Shelly.getComponentConfig("Wifi");
         for (var _i = 0, networks_1 = networks; _i < networks_1.length; _i++) {
             var network = networks_1[_i];
-            if (network.ssid === wifiConfig.sta.ssid) {
+            if (network.ssid === wifiConfig.sta.ssid &&
+                network.auth !== 0 && network.auth !== 1) {
                 print("STA found! Temporarily disabling sta1");
                 Shelly.call("Wifi.SetConfig", {
                     config: {
@@ -80,12 +87,16 @@ function startScanningForRelayAP() {
                         }
                     }
                 });
+                scanningWifi.current = false;
                 return;
             }
         }
         print("STA not found. Will try again in 20 seconds");
         Timer.set(20000, false, startScanningForRelayAP);
     });
+}
+function onDisconnectFromBackend() {
+    getRelayServerScriptId();
 }
 function dispatchEvent(event) {
     print("============================================Event: ");
@@ -97,8 +108,8 @@ function dispatchEvent(event) {
         return;
     }
     if (eventName === "sta_ip_acquired") {
+        checkWifiStatus();
         if (connectedAP.current === "relay_AP") {
-            getRelayServerScriptId();
             // It is possible that sta1 has been disabled in order to switch to sta. 
             // Now it needs to be enabled as back-up wifi
             enqueueShellyCall("Wifi.SetConfig", {
@@ -114,25 +125,39 @@ function dispatchEvent(event) {
         }
         return;
     }
-    if (eventName === "sta_connected") {
-        checkWifiStatus();
+    // if (eventName === "sta_connected") {
+    //     return
+    // }
+}
+function onWSConnect() {
+    wsPingTimedOut.current = false;
+    wsPongReceived.current = true;
+    if (wsPingTimer.current) {
         return;
     }
+    wsPingTimer.current = Timer.set(10000, true, function () {
+        Shelly.emitEvent("ping", null);
+        wsPongReceived.current = false;
+        Timer.set(2000, false, function () {
+            if (wsPongReceived.current) {
+                return;
+            }
+            Timer.clear(wsPingTimer.current);
+            wsPingTimer.current = null;
+            wsPingTimedOut.current = true;
+            onDisconnectFromBackend();
+        });
+    });
 }
 function dispatchStatus(status) {
     print("Status change: ", JSON.stringify(status));
-    if (status.component === "ws" && status.delta.connected) {
-        wsPingTimedOut.current = false;
-        wsPongReceived.current = true;
-        wsPingTimer.current = Timer.set(10000, true, function () {
-            if (!wsPongReceived.current) {
-                Timer.clear(wsPingTimer.current);
-                wsPingTimedOut.current = true;
-                return;
-            }
-            Shelly.emitEvent("ping", null);
-            wsPongReceived.current = false;
-        });
+    if (status.component === "ws") {
+        if (status.delta.connected) {
+            onWSConnect();
+        }
+        else {
+            onDisconnectFromBackend();
+        }
     }
 }
 function handleRFIDRead(tag) {
@@ -168,9 +193,23 @@ function handleRFIDRead(tag) {
             Shelly.call("KVS.GetMany", {}, onGotKVS);
         }
         else {
+            _onDoorUnlock("CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */);
             print("Not connected neither to the backend nor to the server on the relay. Ignoring the read card.");
         }
     }
+}
+function playTones(tones, then) {
+    function playTone(i) {
+        if (i >= tones.length) {
+            PWMSet(2, 0, 0.5);
+            then === null || then === void 0 ? void 0 : then();
+            return;
+        }
+        var tone = tones[i];
+        PWMSet(2, tone.freq, 0.5);
+        Timer.set(tone.duration, false, function () { return playTone(i + 1); });
+    }
+    playTone(0);
 }
 function _onDoorUnlock(result) {
     print("Door unlock result: ", result);
@@ -180,57 +219,70 @@ function _onDoorUnlock(result) {
             case "DOOR_UNLOCKED" /* UNLOCK_RESULT.DOOR_UNLOCKED */: {
                 // Play happy sound - G chord starting in 5th octave - and set color to green
                 RGBSet(0, 12, 0x00FF00);
-                Timer.set(150, false, function () {
-                    PWMSet(2, 587, 0.5);
-                });
-                Timer.set(200, false, function () {
-                    PWMSet(2, 784, 0.3);
-                    Timer.set(50, false, function () {
-                        PWMSet(2, 1175, 0.3);
-                    });
-                    Timer.set(100, false, function () {
-                        PWMSet(2, 1568, 0.3);
-                        Timer.set(150, false, function () {
-                            PWMSet(2, 0, 0.5);
-                            RGBSet(0, 12, 0x000000);
-                        });
-                    });
+                playTones([
+                    {
+                        freq: 587,
+                        duration: 50
+                    },
+                    {
+                        freq: 784,
+                        duration: 50
+                    },
+                    {
+                        freq: 1175,
+                        duration: 50
+                    },
+                    {
+                        freq: 1568,
+                        duration: 150
+                    }
+                ], function () {
+                    RGBSet(0, 12, 0x000000);
                 });
                 break;
             }
             case "CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */: {
-                // Play sad sound (single E note in the 4th octave) and set color to red
+                // Play sad sound (single E note in the 4th octave twice) and set color to red
                 RGBSet(0, 12, 0xFF0000);
-                PWMSet(2, 330, 0.5);
-                Timer.set(200, false, function () {
-                    PWMSet(2, 0, 0);
-                });
-                Timer.set(250, false, function () {
-                    PWMSet(2, 330, 0.5);
-                    Timer.set(250, false, function () {
-                        PWMSet(2, 0, 0);
-                        RGBSet(0, 12, 0x000000);
-                    });
+                playTones([
+                    {
+                        freq: 330,
+                        duration: 200
+                    },
+                    {
+                        freq: 0,
+                        duration: 50
+                    },
+                    {
+                        freq: 330,
+                        duration: 250
+                    }
+                ], function () {
+                    RGBSet(0, 12, 0x000000);
                 });
                 break;
             }
             case "CARD_ADDED" /* UNLOCK_RESULT.CARD_ADDED */: {
                 RGBSet(0, 12, 0xFFff00);
-                Timer.set(150, false, function () {
-                    PWMSet(2, 587, 0.5);
-                });
-                Timer.set(300, false, function () {
-                    PWMSet(2, 784, 0.3);
-                    Timer.set(150, false, function () {
-                        PWMSet(2, 1175, 0.3);
-                    });
-                    Timer.set(300, false, function () {
-                        PWMSet(2, 1568, 0.3);
-                    });
-                    Timer.set(600, false, function () {
-                        PWMSet(2, 0, 0.5);
-                        RGBSet(0, 12, 0x000000);
-                    });
+                playTones([
+                    {
+                        freq: 587,
+                        duration: 150
+                    },
+                    {
+                        freq: 784,
+                        duration: 150
+                    },
+                    {
+                        freq: 1175,
+                        duration: 150
+                    },
+                    {
+                        freq: 1568,
+                        duration: 300
+                    }
+                ], function () {
+                    RGBSet(0, 12, 0x000000);
                 });
                 break;
             }
@@ -246,9 +298,6 @@ function _ping() {
 }
 // Looks for a script named "readers", which is running on the relay, and stores it in relayServerScriptId
 function getRelayServerScriptId() {
-    if (relayServerScriptId.current) {
-        return;
-    }
     function onGotScripts(response) {
         print("Got scripts: ", response);
         if (!response || !response.body) {

@@ -2,11 +2,8 @@ type Ref<T = any> = {
     current: T
 }
 
-// Possible values: 
 // null - disconnected
-// "wifi"
-// "relay_AP"
-let connectedAP: Ref = { current: null }
+let connectedAP: Ref<"relay_AP" | "wifi"> = { current: null }
 
 type ShellyCall = [Shelly.Method, any, Shelly.MethodCallback]
 
@@ -14,9 +11,10 @@ const shellyCallsQueue: ShellyCall[] = []
 
 const relayServerScriptId: Ref = { current: null }
 
-const wsPingTimer: Ref<number> = {current: null}
-const wsPongReceived: Ref<boolean> = {current: true}
-const wsPingTimedOut: Ref<boolean> = {current: false}
+const wsPingTimer: Ref<number> = { current: null }
+const wsPongReceived: Ref<boolean> = { current: true }
+const wsPingTimedOut: Ref<boolean> = { current: false }
+const scanningWifi: Ref = { current: false }
 
 const relayIP = "192.168.33.1"
 
@@ -94,14 +92,29 @@ function checkWifiStatus() {
 }
 
 function startScanningForRelayAP() {
+    if (connectedAP.current !== "wifi" || scanningWifi.current) {
+        return
+    }
+
+    const wifiConfig = Shelly.getComponentConfig("Wifi")
+
+    if (!wifiConfig.sta.ssid) {
+        print("Sta is not set. Not scanning for wifi")
+        return
+    }
+
+    scanningWifi.current = true
+
     enqueueShellyCall("Wifi.Scan", null, (result) => {
+        
         const networks = result.results
-        const wifiConfig = Shelly.getComponentConfig("Wifi")
-
+        
         for (const network of networks) {
-            if (network.ssid === wifiConfig.sta.ssid) {
+            if (network.ssid === wifiConfig.sta.ssid &&
+                network.auth !== 0 && network.auth !== 1
+            ) {
                 print("STA found! Temporarily disabling sta1")
-
+                
                 Shelly.call("Wifi.SetConfig", {
                     config: {
                         sta1: {
@@ -109,7 +122,8 @@ function startScanningForRelayAP() {
                         }
                     }
                 })
-
+                
+                scanningWifi.current = false
                 return
             }
         }
@@ -118,6 +132,10 @@ function startScanningForRelayAP() {
 
         Timer.set(20_000, false, startScanningForRelayAP)
     })
+}
+
+function onDisconnectFromBackend() {
+    getRelayServerScriptId()
 }
 
 function dispatchEvent(event: Shelly.Event) {
@@ -133,9 +151,9 @@ function dispatchEvent(event: Shelly.Event) {
     }
 
     if (eventName === "sta_ip_acquired") {
-        if (connectedAP.current === "relay_AP") {
-            getRelayServerScriptId()
+        checkWifiStatus()
 
+        if (connectedAP.current === "relay_AP") {
             // It is possible that sta1 has been disabled in order to switch to sta. 
             // Now it needs to be enabled as back-up wifi
             enqueueShellyCall("Wifi.SetConfig", {
@@ -153,31 +171,48 @@ function dispatchEvent(event: Shelly.Event) {
         return
     }
 
-    if (eventName === "sta_connected") {
-        checkWifiStatus()
-        return
-    }
+    // if (eventName === "sta_connected") {
+
+    //     return
+    // }
 
 }
 
+function onWSConnect() {
+    wsPingTimedOut.current = false
+    wsPongReceived.current = true
+
+    if(wsPingTimer.current) {
+        return
+    }
+
+    wsPingTimer.current = Timer.set(10_000, true, () => {
+        Shelly.emitEvent("ping", null)
+        wsPongReceived.current = false
+
+        Timer.set(2_000, false, () => {
+            if (wsPongReceived.current) {
+                return
+            }
+
+            Timer.clear(wsPingTimer.current)
+            wsPingTimer.current = null
+            wsPingTimedOut.current = true
+            onDisconnectFromBackend()
+        })
+    })
+}
 
 function dispatchStatus(status: Shelly.StatusChangeEvent) {
     print("Status change: ", JSON.stringify(status))
 
-    if(status.component === "ws" && status.delta.connected) {
-        wsPingTimedOut.current = false
-        wsPongReceived.current = true
-
-        wsPingTimer.current = Timer.set(10_000, true, () => {
-            if(!wsPongReceived.current) {
-                Timer.clear(wsPingTimer.current)
-                wsPingTimedOut.current = true
-                return
-            }
-
-            Shelly.emitEvent("ping", null)
-            wsPongReceived.current = false
-        })
+    if (status.component === "ws") {
+        if (status.delta.connected) {
+            onWSConnect()
+        }
+        else {
+            onDisconnectFromBackend()
+        }
     }
 }
 
@@ -194,10 +229,10 @@ function handleRFIDRead(tag: string) {
         try {
             const responseData = JSON.parse(atob(response.body_b64))
             print(response, responseData)
-            
+
             _onDoorUnlock(responseData.status)
         }
-        catch(e) {
+        catch (e) {
             print("Failed to handle unlock response: ", e)
         }
     }
@@ -223,6 +258,7 @@ function handleRFIDRead(tag: string) {
             Shelly.call("KVS.GetMany", {}, onGotKVS)
         }
         else {
+            _onDoorUnlock(UNLOCK_RESULT.CARD_DECLINED)
             print("Not connected neither to the backend nor to the server on the relay. Ignoring the read card.")
         }
     }
@@ -235,6 +271,28 @@ const enum UNLOCK_RESULT {
 
 }
 
+type Tone = {
+    freq: number
+    duration: number
+}
+
+function playTones(tones: Tone[], then?: () => void) {
+
+    function playTone(i: number) {
+        if (i >= tones.length) {
+            PWMSet(2, 0, 0.5);
+            then?.()
+            return
+        }
+
+        const tone = tones[i]
+        PWMSet(2, tone.freq, 0.5);
+        Timer.set(tone.duration, false, () => playTone(i + 1))
+    }
+
+    playTone(0)
+}
+
 function _onDoorUnlock(result: UNLOCK_RESULT) {
     print("Door unlock result: ", result);
     // SHow LED/buzz indication
@@ -244,67 +302,77 @@ function _onDoorUnlock(result: UNLOCK_RESULT) {
             case UNLOCK_RESULT.DOOR_UNLOCKED: {
                 // Play happy sound - G chord starting in 5th octave - and set color to green
                 RGBSet(0, 12, 0x00FF00);
-                Timer.set(150, false, function () {
-                    PWMSet(2, 587, 0.5);
-                });
 
-                Timer.set(200, false, function () {
-                    PWMSet(2, 784, 0.3);
+                playTones([
+                    {
+                        freq: 587,
+                        duration: 50
+                    },
+                    {
+                        freq: 784,
+                        duration: 50
+                    },
+                    {
+                        freq: 1175,
+                        duration: 50
+                    },
+                    {
+                        freq: 1568,
+                        duration: 150
+                    }
+                ], () => {
+                    RGBSet(0, 12, 0x000000);
+                })
 
-                    Timer.set(50, false, function () {
-                        PWMSet(2, 1175, 0.3);
-                    });
-
-                    Timer.set(100, false, function () {
-                        PWMSet(2, 1568, 0.3);
-
-                        Timer.set(150, false, function () {
-                            PWMSet(2, 0, 0.5);
-                            RGBSet(0, 12, 0x000000);
-                        });
-                    });
-
-                });
                 break;
             }
             case UNLOCK_RESULT.CARD_DECLINED: {
-                // Play sad sound (single E note in the 4th octave) and set color to red
+                // Play sad sound (single E note in the 4th octave twice) and set color to red
                 RGBSet(0, 12, 0xFF0000);
-                PWMSet(2, 330, 0.5);
 
-                Timer.set(200, false, function () {
-                    PWMSet(2, 0, 0);
-                });
-
-                Timer.set(250, false, function () {
-                    PWMSet(2, 330, 0.5);
-
-                    Timer.set(250, false, function () {
-                        PWMSet(2, 0, 0);
-                        RGBSet(0, 12, 0x000000);
-                    });
-                });
+                playTones([
+                    {
+                        freq: 330,
+                        duration: 200
+                    },
+                    {
+                        freq: 0,
+                        duration: 50
+                    },
+                    {
+                        freq: 330,
+                        duration: 250
+                    }
+                ], () => {
+                    RGBSet(0, 12, 0x000000);
+                })
 
                 break;
             }
             case UNLOCK_RESULT.CARD_ADDED: {
                 RGBSet(0, 12, 0xFFff00);
-                Timer.set(150, false, function () {
-                    PWMSet(2, 587, 0.5);
-                });
-                Timer.set(300, false, function () {
-                    PWMSet(2, 784, 0.3);
-                    Timer.set(150, false, function () {
-                        PWMSet(2, 1175, 0.3);
-                    });
-                    Timer.set(300, false, function () {
-                        PWMSet(2, 1568, 0.3);
-                    });
-                    Timer.set(600, false, function () {
-                        PWMSet(2, 0, 0.5);
-                        RGBSet(0, 12, 0x000000);
-                    });
-                });
+
+                playTones([
+                    {
+                        freq: 587,
+                        duration: 150
+                    },
+                    {
+                        freq: 784,
+                        duration: 150
+                    },
+                    {
+                        freq: 1175,
+                        duration: 150
+                    },
+                    {
+                        freq: 1568,
+                        duration: 300
+                    }
+                ], () => {
+                    RGBSet(0, 12, 0x000000);
+                })
+
                 break;
             }
         }
@@ -321,7 +389,7 @@ function _ping() {
 
 // Looks for a script named "readers", which is running on the relay, and stores it in relayServerScriptId
 function getRelayServerScriptId() {
-    if (relayServerScriptId.current) {
+    if(relayServerScriptId.current) {
         return
     }
 

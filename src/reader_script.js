@@ -1,11 +1,8 @@
-// null - disconnected
-var connectedAP = { current: null };
 var shellyCallsQueue = [];
 var relayServerScriptId = { current: null };
 var wsPingTimer = { current: null };
 var wsPongReceived = { current: true };
 var wsPingTimedOut = { current: false };
-var scanningWifi = { current: false };
 var playingTones = { current: false };
 var relayIP = "192.168.33.1";
 function callNext() {
@@ -47,38 +44,6 @@ function sendHTTPWithAuth(method, relative_uri, KVS, data, callback) {
     dataCopy.ssl_ca = "*";
     Shelly.call(method, dataCopy, callback);
 }
-function checkConnectedAP() {
-    try {
-        var wifiStatus = Shelly.getComponentStatus("Wifi");
-        var wifiConfig = Shelly.getComponentConfig("Wifi");
-        print("Got wifi status: ", JSON.stringify(wifiStatus));
-        connectedAP.current = wifiStatus.ssid === wifiConfig.sta1.ssid ?
-            "wifi"
-            :
-                wifiStatus.ssid === wifiConfig.sta.ssid ?
-                    "relay_AP"
-                    :
-                        null;
-    }
-    catch (e) {
-        print("checkConnectedAP failed: ", e);
-    }
-}
-function checkWifiStatus() {
-    checkConnectedAP();
-    try {
-        if (connectedAP.current === "relay_AP") {
-            getRelayServerScriptId();
-        }
-        else {
-            startScanningForRelayAP();
-        }
-        print(connectedAP.current);
-    }
-    catch (e) {
-        print("checkWifiStatus failed: ", e);
-    }
-}
 function checkWSStatus() {
     var status = Shelly.getComponentStatus("WS");
     print("Check ws status ------------------------------: ", status);
@@ -86,46 +51,7 @@ function checkWSStatus() {
         onWSConnect();
     }
 }
-function startScanningForRelayAP() {
-    if (scanningWifi.current) {
-        return;
-    }
-    scanningWifi.current = true;
-    function scanForRelayAP() {
-        if (connectedAP.current !== "wifi") {
-            return;
-        }
-        var wifiConfig = Shelly.getComponentConfig("Wifi");
-        if (!wifiConfig.sta.ssid) {
-            print("Sta is not set. Not scanning for wifi");
-            return;
-        }
-        enqueueShellyCall("Wifi.Scan", null, function (result) {
-            var networks = result.results;
-            for (var _i = 0, networks_1 = networks; _i < networks_1.length; _i++) {
-                var network = networks_1[_i];
-                if (network.ssid === wifiConfig.sta.ssid &&
-                    network.auth !== 0 && network.auth !== 1) {
-                    print("STA found! Temporarily disabling sta1");
-                    Shelly.call("Wifi.SetConfig", {
-                        config: {
-                            sta1: {
-                                enable: false
-                            }
-                        }
-                    });
-                    scanningWifi.current = false;
-                    return;
-                }
-            }
-            print("STA not found. Will try again in 20 seconds");
-            Timer.set(20000, false, scanForRelayAP);
-        });
-    }
-    scanForRelayAP();
-}
 function onDisconnectFromBackend() {
-    checkConnectedAP();
     getRelayServerScriptId();
 }
 function dispatchEvent(event) {
@@ -133,31 +59,10 @@ function dispatchEvent(event) {
     print(JSON.stringify(event));
     var eventName = event.info.event;
     print(eventName);
-    if (eventName === "sta_connect_fail" || eventName === "sta_disconnected") {
-        connectedAP.current = null;
-        return;
-    }
     if (eventName === "sta_ip_acquired") {
-        checkWifiStatus();
-        if (connectedAP.current === "relay_AP") {
-            // It is possible that sta1 has been disabled in order to switch to sta. 
-            // Now it needs to be enabled as back-up wifi
-            enqueueShellyCall("Wifi.SetConfig", {
-                config: {
-                    sta1: {
-                        enable: true
-                    }
-                }
-            });
-        }
-        else {
-            startScanningForRelayAP();
-        }
+        getRelayServerScriptId();
         return;
     }
-    // if (eventName === "sta_connected") {
-    //     return
-    // }
 }
 function onWSConnect() {
     wsPingTimedOut.current = false;
@@ -193,10 +98,6 @@ function dispatchStatus(status) {
 }
 function handleRFIDRead(tag) {
     print("Scan card: ", tag);
-    if (connectedAP.current === null) {
-        print("The read card is ignored as the reader is not connected to wifi");
-        return;
-    }
     function onGotRelayUnlockResponse(response) {
         try {
             var responseData = JSON.parse(atob(response.body_b64));
@@ -212,21 +113,21 @@ function handleRFIDRead(tag) {
         sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {}, onGotRelayUnlockResponse);
     }
     var wsStatus = Shelly.getComponentStatus("WS");
+    var wifiStatus = Shelly.getComponentStatus("Wifi");
+    if (!wifiStatus.ssid) {
+        _onDoorUnlock("CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */);
+        print("Not connected to wifi. Ignoring the card.");
+        return;
+    }
     if (wsStatus.connected && !wsPingTimedOut.current) {
-        // TO DO: don't notify all through RPC channels
+        // TO DO: don't notify through all RPC channels
         Shelly.emitEvent("card_read", {
             cardId: tag
         });
     }
     else {
-        if (connectedAP.current === "relay_AP") {
-            // Make an HTTP request to the server on the relay
-            Shelly.call("KVS.GetMany", {}, onGotKVS);
-        }
-        else {
-            _onDoorUnlock("CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */);
-            print("Not connected neither to the backend nor to the server on the relay. Ignoring the read card.");
-        }
+        // Make an HTTP request to the server on the relay
+        Shelly.call("KVS.GetMany", {}, onGotKVS);
     }
 }
 function playTones(tones, then) {
@@ -340,7 +241,8 @@ function getRelayServerScriptId() {
     if (relayServerScriptId.current) {
         return;
     }
-    if (connectedAP.current !== "relay_AP") {
+    var wifiStatus = Shelly.getComponentStatus("Wifi");
+    if (!wifiStatus.ssid) {
         return;
     }
     function onGotScripts(response) {

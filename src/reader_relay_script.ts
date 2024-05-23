@@ -156,17 +156,6 @@ function configureWiFi() {
 }
 
 
-function HTTPGetBackendConnectionStatus(request: HTTPServer.Request, response: HTTPServer.Response) {
-    const status = Shelly.getComponentStatus("WS")
-
-    response.code = 200
-    response.body = JSON.stringify({
-        isConnected: status.connected
-    })
-
-    response.send()
-}
-
 function parseQuery(query: string) {
     const items = query.split("&")
 
@@ -205,7 +194,6 @@ function HTTPPostOpenRelayWithCard(request: HTTPServer.Request, response: HTTPSe
 }
 
 function setupHTTPServer() {
-    HTTPServer.registerEndpoint("backend_connection_status", HTTPGetBackendConnectionStatus)
     HTTPServer.registerEndpoint("open_relay_with_rfid", HTTPPostOpenRelayWithCard)
 }
 

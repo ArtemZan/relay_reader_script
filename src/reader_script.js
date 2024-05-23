@@ -6,6 +6,7 @@ var wsPingTimer = { current: null };
 var wsPongReceived = { current: true };
 var wsPingTimedOut = { current: false };
 var scanningWifi = { current: false };
+var playingTones = { current: false };
 var relayIP = "192.168.33.1";
 function callNext() {
     var call = shellyCallsQueue[0];
@@ -43,14 +44,29 @@ function sendHTTPWithAuth(method, relative_uri, KVS, data, callback) {
     var url = "http://admin:" + KVS.relay_password.value + "@" + relayIP + "/script/" + relayServerScriptId.current + relative_uri;
     var dataCopy = JSON.parse(JSON.stringify(data));
     dataCopy.url = url;
+    dataCopy.ssl_ca = "*";
     Shelly.call(method, dataCopy, callback);
 }
-function checkWifiStatus() {
-    var wifiStatus = Shelly.getComponentStatus("Wifi");
-    var wifiConfig = Shelly.getComponentConfig("Wifi");
-    print("Got wifi status: ", JSON.stringify(wifiStatus));
+function checkConnectedAP() {
     try {
-        connectedAP.current = wifiStatus.ssid === wifiConfig.sta1.ssid ? "wifi" : "relay_AP";
+        var wifiStatus = Shelly.getComponentStatus("Wifi");
+        var wifiConfig = Shelly.getComponentConfig("Wifi");
+        print("Got wifi status: ", JSON.stringify(wifiStatus));
+        connectedAP.current = wifiStatus.ssid === wifiConfig.sta1.ssid ?
+            "wifi"
+            :
+                wifiStatus.ssid === wifiConfig.sta.ssid ?
+                    "relay_AP"
+                    :
+                        null;
+    }
+    catch (e) {
+        print("checkConnectedAP failed: ", e);
+    }
+}
+function checkWifiStatus() {
+    checkConnectedAP();
+    try {
         if (connectedAP.current === "relay_AP") {
             getRelayServerScriptId();
         }
@@ -60,42 +76,56 @@ function checkWifiStatus() {
         print(connectedAP.current);
     }
     catch (e) {
-        print("Failed to parse wifi config");
+        print("checkWifiStatus failed: ", e);
+    }
+}
+function checkWSStatus() {
+    var status = Shelly.getComponentStatus("WS");
+    print("Check ws status ------------------------------: ", status);
+    if (status.connected) {
+        onWSConnect();
     }
 }
 function startScanningForRelayAP() {
-    if (connectedAP.current !== "wifi" || scanningWifi.current) {
-        return;
-    }
-    var wifiConfig = Shelly.getComponentConfig("Wifi");
-    if (!wifiConfig.sta.ssid) {
-        print("Sta is not set. Not scanning for wifi");
+    if (scanningWifi.current) {
         return;
     }
     scanningWifi.current = true;
-    enqueueShellyCall("Wifi.Scan", null, function (result) {
-        var networks = result.results;
-        for (var _i = 0, networks_1 = networks; _i < networks_1.length; _i++) {
-            var network = networks_1[_i];
-            if (network.ssid === wifiConfig.sta.ssid &&
-                network.auth !== 0 && network.auth !== 1) {
-                print("STA found! Temporarily disabling sta1");
-                Shelly.call("Wifi.SetConfig", {
-                    config: {
-                        sta1: {
-                            enable: false
-                        }
-                    }
-                });
-                scanningWifi.current = false;
-                return;
-            }
+    function scanForRelayAP() {
+        if (connectedAP.current !== "wifi") {
+            return;
         }
-        print("STA not found. Will try again in 20 seconds");
-        Timer.set(20000, false, startScanningForRelayAP);
-    });
+        var wifiConfig = Shelly.getComponentConfig("Wifi");
+        if (!wifiConfig.sta.ssid) {
+            print("Sta is not set. Not scanning for wifi");
+            return;
+        }
+        enqueueShellyCall("Wifi.Scan", null, function (result) {
+            var networks = result.results;
+            for (var _i = 0, networks_1 = networks; _i < networks_1.length; _i++) {
+                var network = networks_1[_i];
+                if (network.ssid === wifiConfig.sta.ssid &&
+                    network.auth !== 0 && network.auth !== 1) {
+                    print("STA found! Temporarily disabling sta1");
+                    Shelly.call("Wifi.SetConfig", {
+                        config: {
+                            sta1: {
+                                enable: false
+                            }
+                        }
+                    });
+                    scanningWifi.current = false;
+                    return;
+                }
+            }
+            print("STA not found. Will try again in 20 seconds");
+            Timer.set(20000, false, scanForRelayAP);
+        });
+    }
+    scanForRelayAP();
 }
 function onDisconnectFromBackend() {
+    checkConnectedAP();
     getRelayServerScriptId();
 }
 function dispatchEvent(event) {
@@ -132,6 +162,7 @@ function dispatchEvent(event) {
 function onWSConnect() {
     wsPingTimedOut.current = false;
     wsPongReceived.current = true;
+    print("onWSConnect:", wsPingTimer.current);
     if (wsPingTimer.current) {
         return;
     }
@@ -199,8 +230,10 @@ function handleRFIDRead(tag) {
     }
 }
 function playTones(tones, then) {
+    playingTones.current = true;
     function playTone(i) {
         if (i >= tones.length) {
+            playingTones.current = false;
             PWMSet(2, 0, 0.5);
             then === null || then === void 0 ? void 0 : then();
             return;
@@ -209,7 +242,13 @@ function playTones(tones, then) {
         PWMSet(2, tone.freq, 0.5);
         Timer.set(tone.duration, false, function () { return playTone(i + 1); });
     }
-    playTone(0);
+    try {
+        playTone(0);
+    }
+    catch (e) {
+        playingTones.current = false;
+        print("Failed to play tones: ", e);
+    }
 }
 function _onDoorUnlock(result) {
     print("Door unlock result: ", result);
@@ -237,9 +276,33 @@ function _onDoorUnlock(result) {
                         duration: 150
                     }
                 ], function () {
-                    RGBSet(0, 12, 0x000000);
+                    RGBSet(0, 12, 0xFFFFFF);
                 });
                 break;
+            }
+            case "CARD_ADDED" /* UNLOCK_RESULT.CARD_ADDED */: {
+                // RGBSet(0, 12, 0xFFff00);
+                // playTones([
+                //     {
+                //         freq: 587,
+                //         duration: 150
+                //     },
+                //     {
+                //         freq: 784,
+                //         duration: 150
+                //     },
+                //     {
+                //         freq: 1175,
+                //         duration: 150
+                //     },
+                //     {
+                //         freq: 1568,
+                //         duration: 300
+                //     }
+                // ], () => {
+                //     RGBSet(0, 12, 0xFFFFFF);
+                // })
+                // break;
             }
             case "CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */: {
                 // Play sad sound (single E note in the 4th octave twice) and set color to red
@@ -258,31 +321,7 @@ function _onDoorUnlock(result) {
                         duration: 250
                     }
                 ], function () {
-                    RGBSet(0, 12, 0x000000);
-                });
-                break;
-            }
-            case "CARD_ADDED" /* UNLOCK_RESULT.CARD_ADDED */: {
-                RGBSet(0, 12, 0xFFff00);
-                playTones([
-                    {
-                        freq: 587,
-                        duration: 150
-                    },
-                    {
-                        freq: 784,
-                        duration: 150
-                    },
-                    {
-                        freq: 1175,
-                        duration: 150
-                    },
-                    {
-                        freq: 1568,
-                        duration: 300
-                    }
-                ], function () {
-                    RGBSet(0, 12, 0x000000);
+                    RGBSet(0, 12, 0xFFFFFF);
                 });
                 break;
             }
@@ -298,6 +337,12 @@ function _ping() {
 }
 // Looks for a script named "readers", which is running on the relay, and stores it in relayServerScriptId
 function getRelayServerScriptId() {
+    if (relayServerScriptId.current) {
+        return;
+    }
+    if (connectedAP.current !== "relay_AP") {
+        return;
+    }
     function onGotScripts(response) {
         print("Got scripts: ", response);
         if (!response || !response.body) {
@@ -315,27 +360,26 @@ function getRelayServerScriptId() {
     }
     enqueueShellyCall("KVS.Get", { key: "relay_password" }, function (relay_password) {
         enqueueShellyCall("HTTP.GET", {
-            url: "http://admin:" + relay_password.value + "@" + "192.168.33.1/rpc/Script.List"
+            url: "http://admin:" + relay_password.value + "@" + "192.168.33.1/rpc/Script.List",
+            ssl_ca: "*"
         }, onGotScripts);
     });
 }
-function indicateInit() {
+function indicateLED() {
     try {
         RGBSet(0, 12, 0xffffff);
-        Timer.set(1000, false, function () {
-            RGBSet(0, 12, 0x000000);
-        });
     }
     catch (e) {
-        print("Failed to run 'indicateInit': ", e);
+        print("Failed to run 'indicateLED': ", e);
         print("But the script is still alive");
     }
 }
 function init() {
-    indicateInit();
+    indicateLED();
     Shelly.addEventHandler(dispatchEvent);
     Shelly.addStatusHandler(dispatchStatus);
     RFIDScanner.start(handleRFIDRead);
     checkWifiStatus();
+    checkWSStatus();
 }
 init();

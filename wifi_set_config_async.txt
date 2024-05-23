@@ -1,0 +1,71 @@
+shelly_ejs_rpc.cpp:41   Shelly.call Wifi.Scan null
+shos_rpc_inst.c:230     Wifi.Scan via loopback 
+shos_rpc_inst.c:230     Shelly.GetConfig via WSS_out 34.36.90.78:443
+shos_init.c:90          New min heap free: 95892
+onComplete
+Calling callback for:  Wifi.Scan with result:  {"results":[{"ssid":"Artem","bssid":"5e:8d:79:eb:48:7e","auth":3,"channel":11,"rs
+si":-17},{"ssid":"ShellyPro1-EC62608B5314","bssid":"ec:62:60:8b:53:15","auth":3,"channel":11,"rssi":-37},{"ssid":"ShellyPlus1-A8
+032AB92144","bssid":"a8:03:2a:b9:21:45","auth":3,"channel":1,"rssi":-55},{"ssid":"ShellyPlugSG3-5432045FBFA0","bssid":"54:32:04:
+5f:bf:a1","auth":0,"channel":6,"rssi":-59},{"ssid":"shelly1-B9278F","bssid":"9a:f4:ab:b9:27:8f","auth":0,"channel":3,"rssi":-63}
+,{"ssid":"ShellyPlus1PM-A8032AB17788","bssid":"a8:03:2a:b1:77:89","auth":0,"channel":6,"rssi":-63},{"ssid":"Shelly_PO_test","bss
+id":"14:eb:b6:ab:07:1b","auth":4,"channel":8,"rssi":-64},{"ssid":"ShellyPro1-EC6260912B4C","bssid":"ec:62:60:91:2b:4d","auth":0,
+"channel":6,"rssi":-67},{"ssid":"Arte_STR","bssid":"b4:0f:3b:5a:80:81","auth":4,"channel":4,"rssi":-72},{"ssid":"Allterco WiFi",
+"bssid":"d0:21:f9:c8:4e:ee","auth":3,"channel":1,"rssi":-75},{"ssid":"ShellyPlusRGBWPM-D8132ADDC020","bssid":"d8:13:2a:dd:c0:21"
+,"auth":3,"channel":6,"rssi":-75},{"ssid":"shelly4pro-061D42","bssid":"c8:fd:19:06:1d:42","auth":0,"channel":6,"rssi":-75},{"ssi
+d":"ShellyPlus2PM-C049EF876120","bssid":"c0:49:ef:87:61:21","auth":0,"channel":11,"rssi":-77},{"ssid":"IoT 4 West","bssid":"30:d
+e:4b:49:fe:ca","auth":4,"channel":1,"rssi":-77},{"ssid":"IoT 4 East","bssid":"02:de:4b:49:fe:ca","auth":4,"channel":1,"rssi":-77
+},{"ssid":"ShellyPro2-C8F09E87FD54","bssid":"c8:f0:9e:87:fd:55","auth":0,"channel":3,"rssi":-79},{"ssid":"shelly4pro-061E01","bs
+sid":"c8:fd:19:06:1e:01","auth":0,"channel":4,"rssi":-79},{"ssid":"IoT-Support","bssid":"b0:a7:b9:4d:83:3e","auth":3,"channel":1
+1,"rssi":-79},{"ssid":"ShellyDev1C6-404CCAFFFE40","bssid":"40:4c:ca:ff:fe:41","auth":0,"channel":6,"rssi":-79},{"ssid":"Pako","b
+ssid":"7c:8b:ca:a7:31:50","auth":3,"channel":3,"rssi":-80},{"ssid":"ShellyPro2-C8F09E882768","bssid":"c8:f0:9e:88:27:69","auth":
+0,"channel":5,"rssi":-80},{"ssid":"ShellyPlusWDUS-441793CCB7E4","bssid":"44:17:93:cc:b7:e5","auth":0,"channel":11,"rssi":-84},{"
+ssid":"ShellyXMOD1-543204515C88","bssid":"54:32:04:51:5c:89","auth":0,"channel":11,"rssi":-85},{"ssid":"ShellyDDimmerG3-34B7DA90
+0D78","bssid":"34:b7:da:90:0d:79","auth":0,"channel":1,"rssi":-85},{"ssid":"ShellyPro1PM-30C6F78298E0","bssid":"30:c6:f7:82:98:e
+1","auth":0,"channel":11,"rssi":-88},{"ssid":"ShellyPlus1PM-44179393E8E4","bssid":"44:17:93:93:e8:e5","auth":0,"channel":11,"rss
+i":-89}]}
+STA found! Temporarily disabling sta1
+shelly_ejs_rpc.cpp:41   Shelly.call Wifi.SetConfig {"config":{"sta1":{"enable":false}}}
+pop the call from queue. Calls left:  1
+shos_rpc_inst.c:230     Wifi.SetConfig via loopback 
+============================================Event: 
+{"component":"wifi","name":"wifi","id":-1,"now":1716195921.15489459037,"info":{"component":"wifi","event":"config_changed","rest
+art_required":false,"ts":1716195921.14999985694,"cfg_rev":7}}
+config_changed
+shelly_notification:209 Event from wifi: {"component":"wifi","event":"config_changed","restart_required":false,"ts":1716195921.15,"cfg_rev":7}
+shelly_notification:163 Status change of sys: {"cfg_rev":7}
+Status change:  {"component":"sys","name":"sys","id":-1,"delta":{"cfg_rev":7}}
+shos_rpc_inst.c:230     WiFi.GetStatus via WSS_out 34.36.90.78:443
+shos_rpc_inst.c:230     wifi.getconfig via WS_in 192.168.34.98:49890
+shos_rpc_inst.c:230     WiFi.GetConfig via WSS_out 34.36.90.78:443
+shos_rpc_inst.c:230     KVS.GetMany via WSS_out 34.36.90.78:443
+shos_rpc_inst.c:230     WiFi.SetConfig via WSS_out 34.36.90.78:443
+shos_rpc_inst.c:230     KVS.Set via WSS_out 34.36.90.78:443
+shelly_notification:163 Status change of sys: {"kvs_rev":13}
+Status change:  {"component":"sys","name":"sys","id":-1,"delta":{"kvs_rev":13}}
+shos_rpc_inst.c:230     kvs.getmany via WS_in 192.168.34.98:49890
+shos_rpc_inst.c:230     Script.PutCode via WSS_out 34.36.90.78:443
+shos_rpc_inst.c:230     Script.Start via WSS_out 34.36.90.78:443
+shos_rpc_inst.c:230     Script.SetConfig via WSS_out 34.36.90.78:443
+shos_rpc_inst.c:230     KVS.Set via WSS_out 34.36.90.78:443
+shelly_notification:163 Status change of sys: {"kvs_rev":14}
+Status change:  {"component":"sys","name":"sys","id":-1,"delta":{"kvs_rev":14}}
+shos_rpc_inst.c:230     kvs.getmany via WS_in 192.168.34.98:49890
+============================================Event: 
+{"component":"script:1","name":"script","id":1,"now":1716195923.44228029251,"info":{"component":"script:1","id":1,"event":"ping"
+,"data":null,"ts":1716195923.44000005722}}
+ping
+shelly_notification:209 Event from script:1: {"component":"script:1","id":1,"event":"ping","data":null,"ts":1716195923.44}
+shos_rpc_inst.c:230     Script.Eval via WSS_out 34.36.90.78:443
+============================================Event: 
+{"component":"script:1","name":"script","id":1,"now":1716195933.44366431236,"info":{"component":"script:1","id":1,"event":"ping"
+,"data":null,"ts":1716195933.44000005722}}
+ping
+shelly_notification:209 Event from script:1: {"component":"script:1","id":1,"event":"ping","data":null,"ts":1716195933.44}
+shos_rpc_inst.c:230     Script.Eval via WSS_out 34.36.90.78:443
+shos_rpc_inst.c:230     wifi.scan via WS_in 192.168.34.98:49890
+============================================Event: 
+{"component":"script:1","name":"script","id":1,"now":1716195943.44253110885,"info":{"component":"script:1","id":1,"event":"ping"
+,"data":null,"ts":1716195943.44000005722}}
+ping
+shelly_notification:209 Event from script:1: {"component":"script:1","id":1,"event":"ping","data":null,"ts":1716195943.44}
+shos_rpc_inst.c:230     Script.Eval via WSS_out 34.36.90.78:443

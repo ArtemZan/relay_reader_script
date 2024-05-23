@@ -15,6 +15,7 @@ const wsPingTimer: Ref<number> = { current: null }
 const wsPongReceived: Ref<boolean> = { current: true }
 const wsPingTimedOut: Ref<boolean> = { current: false }
 const scanningWifi: Ref = { current: false }
+const playingTones: Ref = { current: false }
 
 const relayIP = "192.168.33.1"
 
@@ -64,19 +65,34 @@ function sendHTTPWithAuth(method: `HTTP.${HTTPServer.Method}`, relative_uri: str
 
     const dataCopy = JSON.parse(JSON.stringify(data))
     dataCopy.url = url
+    dataCopy.ssl_ca = "*"
 
     Shelly.call(method, dataCopy, callback)
 }
 
+function checkConnectedAP() {
+    try {
+        const wifiStatus = Shelly.getComponentStatus("Wifi")
+        const wifiConfig = Shelly.getComponentConfig("Wifi")
+        print("Got wifi status: ", JSON.stringify(wifiStatus))
+
+        connectedAP.current = wifiStatus.ssid === wifiConfig.sta1.ssid ?
+            "wifi"
+            :
+            wifiStatus.ssid === wifiConfig.sta.ssid ?
+                "relay_AP"
+                :
+                null
+    }
+    catch (e) {
+        print("checkConnectedAP failed: ", e)
+    }
+}
 
 function checkWifiStatus() {
-    const wifiStatus = Shelly.getComponentStatus("Wifi")
-    const wifiConfig = Shelly.getComponentConfig("Wifi")
-    print("Got wifi status: ", JSON.stringify(wifiStatus))
+    checkConnectedAP()
 
     try {
-        connectedAP.current = wifiStatus.ssid === wifiConfig.sta1.ssid ? "wifi" : "relay_AP"
-
         if (connectedAP.current === "relay_AP") {
             getRelayServerScriptId()
         }
@@ -87,54 +103,72 @@ function checkWifiStatus() {
         print(connectedAP.current)
     }
     catch (e) {
-        print("Failed to parse wifi config")
+        print("checkWifiStatus failed: ", e)
+    }
+}
+
+function checkWSStatus() {
+    const status = Shelly.getComponentStatus("WS")
+    print("Check ws status ------------------------------: ", status);
+
+    if (status.connected) {
+        onWSConnect()
     }
 }
 
 function startScanningForRelayAP() {
-    if (connectedAP.current !== "wifi" || scanningWifi.current) {
-        return
-    }
-
-    const wifiConfig = Shelly.getComponentConfig("Wifi")
-
-    if (!wifiConfig.sta.ssid) {
-        print("Sta is not set. Not scanning for wifi")
+    if (scanningWifi.current) {
         return
     }
 
     scanningWifi.current = true
 
-    enqueueShellyCall("Wifi.Scan", null, (result) => {
-        
-        const networks = result.results
-        
-        for (const network of networks) {
-            if (network.ssid === wifiConfig.sta.ssid &&
-                network.auth !== 0 && network.auth !== 1
-            ) {
-                print("STA found! Temporarily disabling sta1")
-                
-                Shelly.call("Wifi.SetConfig", {
-                    config: {
-                        sta1: {
-                            enable: false
-                        }
-                    }
-                })
-                
-                scanningWifi.current = false
-                return
-            }
+    function scanForRelayAP() {
+        if (connectedAP.current !== "wifi") {
+            return
         }
 
-        print("STA not found. Will try again in 20 seconds")
+        const wifiConfig = Shelly.getComponentConfig("Wifi")
 
-        Timer.set(20_000, false, startScanningForRelayAP)
-    })
+        if (!wifiConfig.sta.ssid) {
+            print("Sta is not set. Not scanning for wifi")
+            return
+        }
+
+        enqueueShellyCall("Wifi.Scan", null, (result) => {
+
+            const networks = result.results
+
+            for (const network of networks) {
+                if (network.ssid === wifiConfig.sta.ssid &&
+                    network.auth !== 0 && network.auth !== 1
+                ) {
+                    print("STA found! Temporarily disabling sta1")
+
+                    Shelly.call("Wifi.SetConfig", {
+                        config: {
+                            sta1: {
+                                enable: false
+                            }
+                        }
+                    })
+
+                    scanningWifi.current = false
+                    return
+                }
+            }
+
+            print("STA not found. Will try again in 20 seconds")
+
+            Timer.set(20_000, false, scanForRelayAP)
+        })
+    }
+
+    scanForRelayAP()
 }
 
 function onDisconnectFromBackend() {
+    checkConnectedAP()
     getRelayServerScriptId()
 }
 
@@ -182,7 +216,9 @@ function onWSConnect() {
     wsPingTimedOut.current = false
     wsPongReceived.current = true
 
-    if(wsPingTimer.current) {
+    print("onWSConnect:", wsPingTimer.current)
+
+    if (wsPingTimer.current) {
         return
     }
 
@@ -277,9 +313,11 @@ type Tone = {
 }
 
 function playTones(tones: Tone[], then?: () => void) {
+    playingTones.current = true
 
     function playTone(i: number) {
         if (i >= tones.length) {
+            playingTones.current = false
             PWMSet(2, 0, 0.5);
             then?.()
             return
@@ -290,7 +328,13 @@ function playTones(tones: Tone[], then?: () => void) {
         Timer.set(tone.duration, false, () => playTone(i + 1))
     }
 
-    playTone(0)
+    try {
+        playTone(0)
+    }
+    catch (e) {
+        playingTones.current = false
+        print("Failed to play tones: ", e)
+    }
 }
 
 function _onDoorUnlock(result: UNLOCK_RESULT) {
@@ -321,10 +365,36 @@ function _onDoorUnlock(result: UNLOCK_RESULT) {
                         duration: 150
                     }
                 ], () => {
-                    RGBSet(0, 12, 0x000000);
+                    RGBSet(0, 12, 0xFFFFFF);
                 })
 
                 break;
+            }
+            case UNLOCK_RESULT.CARD_ADDED: {
+                // RGBSet(0, 12, 0xFFff00);
+
+                // playTones([
+                //     {
+                //         freq: 587,
+                //         duration: 150
+                //     },
+                //     {
+                //         freq: 784,
+                //         duration: 150
+                //     },
+                //     {
+                //         freq: 1175,
+                //         duration: 150
+                //     },
+                //     {
+                //         freq: 1568,
+                //         duration: 300
+                //     }
+                // ], () => {
+                //     RGBSet(0, 12, 0xFFFFFF);
+                // })
+
+                // break;
             }
             case UNLOCK_RESULT.CARD_DECLINED: {
                 // Play sad sound (single E note in the 4th octave twice) and set color to red
@@ -344,33 +414,7 @@ function _onDoorUnlock(result: UNLOCK_RESULT) {
                         duration: 250
                     }
                 ], () => {
-                    RGBSet(0, 12, 0x000000);
-                })
-
-                break;
-            }
-            case UNLOCK_RESULT.CARD_ADDED: {
-                RGBSet(0, 12, 0xFFff00);
-
-                playTones([
-                    {
-                        freq: 587,
-                        duration: 150
-                    },
-                    {
-                        freq: 784,
-                        duration: 150
-                    },
-                    {
-                        freq: 1175,
-                        duration: 150
-                    },
-                    {
-                        freq: 1568,
-                        duration: 300
-                    }
-                ], () => {
-                    RGBSet(0, 12, 0x000000);
+                    RGBSet(0, 12, 0xFFFFFF);
                 })
 
                 break;
@@ -389,7 +433,11 @@ function _ping() {
 
 // Looks for a script named "readers", which is running on the relay, and stores it in relayServerScriptId
 function getRelayServerScriptId() {
-    if(relayServerScriptId.current) {
+    if (relayServerScriptId.current) {
+        return
+    }
+
+    if (connectedAP.current !== "relay_AP") {
         return
     }
 
@@ -415,26 +463,24 @@ function getRelayServerScriptId() {
 
     enqueueShellyCall("KVS.Get", { key: "relay_password" }, function (relay_password) {
         enqueueShellyCall("HTTP.GET", {
-            url: "http://admin:" + relay_password.value + "@" + "192.168.33.1/rpc/Script.List"
+            url: "http://admin:" + relay_password.value + "@" + "192.168.33.1/rpc/Script.List",
+            ssl_ca: "*"
         }, onGotScripts)
     })
 }
 
-function indicateInit() {
+function indicateLED() {
     try {
         RGBSet(0, 12, 0xffffff);
-        Timer.set(1000, false, function () {
-            RGBSet(0, 12, 0x000000);
-        })
     }
     catch (e) {
-        print("Failed to run 'indicateInit': ", e);
+        print("Failed to run 'indicateLED': ", e);
         print("But the script is still alive");
     }
 }
 
 function init() {
-    indicateInit()
+    indicateLED()
 
     Shelly.addEventHandler(dispatchEvent)
     Shelly.addStatusHandler(dispatchStatus)
@@ -442,6 +488,7 @@ function init() {
     RFIDScanner.start(handleRFIDRead);
 
     checkWifiStatus()
+    checkWSStatus()
 }
 
 

@@ -1,5 +1,5 @@
 function handleRFIDRead(tag) {
-    print("Scan card: ");
+    print("Scan card: ", tag);
 }
 
 print("Hello!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")

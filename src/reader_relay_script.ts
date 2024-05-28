@@ -77,7 +77,7 @@ function turnTheSwitch(KVS: KVS) {
 
     Shelly.call("Switch.Set", {
         id: input,
-        on: defaultLockState === "CLOSED",
+        on: defaultLockState === "OPEN",
         toggle_after: timeout || 5
     })
 }

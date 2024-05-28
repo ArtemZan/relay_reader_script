@@ -54,7 +54,7 @@ function turnTheSwitch(KVS) {
     print("Switching");
     Shelly.call("Switch.Set", {
         id: input,
-        on: defaultLockState === "CLOSED",
+        on: defaultLockState === "OPEN",
         toggle_after: timeout || 5
     });
 }
@@ -114,14 +114,6 @@ function configureWiFi() {
         }
     });
 }
-function HTTPGetBackendConnectionStatus(request, response) {
-    var status = Shelly.getComponentStatus("WS");
-    response.code = 200;
-    response.body = JSON.stringify({
-        isConnected: status.connected
-    });
-    response.send();
-}
 function parseQuery(query) {
     var items = query.split("&");
     var result = {};
@@ -145,7 +137,6 @@ function HTTPPostOpenRelayWithCard(request, response) {
     });
 }
 function setupHTTPServer() {
-    HTTPServer.registerEndpoint("backend_connection_status", HTTPGetBackendConnectionStatus);
     HTTPServer.registerEndpoint("open_relay_with_rfid", HTTPPostOpenRelayWithCard);
 }
 function init() {

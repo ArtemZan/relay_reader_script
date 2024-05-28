@@ -12,8 +12,7 @@ const wsPingTimer: Ref<number> = { current: null }
 const wsPongReceived: Ref<boolean> = { current: true }
 const wsPingTimedOut: Ref<boolean> = { current: false }
 const playingTones: Ref = { current: false }
-
-const relayIP = "192.168.33.1"
+const cardReadResponseTimeout: Ref = {current: false}
 
 function callNext() {
     const call = shellyCallsQueue[0]
@@ -51,13 +50,38 @@ function enqueueShellyCall(method: Shelly.Method, params?: any, callback?: Shell
     }
 }
 
+function getRelayIP() {
+    const wifiStatus = Shelly.getComponentStatus("Wifi")
+    const staIP = wifiStatus?.sta_ip
+
+    if(!staIP) {
+        return null
+    }
+
+    const lastDotIndex = staIP.lastIndexOf(".")
+
+    if(lastDotIndex === -1) {
+        print("lastDotIndex was -1.")
+        return
+    }
+
+    return staIP.slice(0, lastDotIndex) + ".1"
+}
+
 function sendHTTPWithAuth(method: `HTTP.${HTTPServer.Method}`, relative_uri: string, KVS: KVS, data: any, callback?: (response: HTTPServer.Response) => void) {
+    const relayIP = getRelayIP()
+
+    if(!relayIP) {
+        print("IP of the relay is unknown. HTTP request aborted.")
+        return
+    }
+
     if (!KVS.relay_password) {
         print("No password")
         return
     }
 
-    const url = "http://admin:" + KVS.relay_password.value + "@" + relayIP + "/script/" + relayServerScriptId.current + relative_uri
+    const url = "http://admin:" + KVS.relay_password.value + "@" + getRelayIP() + "/script/" + relayServerScriptId.current + relative_uri
 
     const dataCopy = JSON.parse(JSON.stringify(data))
     dataCopy.url = url
@@ -167,6 +191,16 @@ function handleRFIDRead(tag: string) {
         return
     }
 
+    if(cardReadResponseTimeout.current) {
+        print("Ignoring the card as another reading is still being processed.")
+        return
+    }
+
+    // Cleared in _onDoorUnlock or after a timeout
+    cardReadResponseTimeout.current = Timer.set(5000, false, () => {
+        cardReadResponseTimeout.current = null
+    })
+
     if (wsStatus.connected && !wsPingTimedOut.current) {
         // TO DO: don't notify through all RPC channels
         Shelly.emitEvent("card_read", {
@@ -218,6 +252,9 @@ function playTones(tones: Tone[], then?: () => void) {
 
 function _onDoorUnlock(result: UNLOCK_RESULT) {
     print("Door unlock result: ", result);
+
+    Timer.clear(cardReadResponseTimeout.current)
+    cardReadResponseTimeout.current = null
     // SHow LED/buzz indication
 
     try {
@@ -312,6 +349,13 @@ function _ping() {
 
 // Looks for a script named "readers", which is running on the relay, and stores it in relayServerScriptId
 function getRelayServerScriptId() {
+    const relayIP = getRelayIP()
+
+    if(!relayIP) {
+        print("IP of the relay is unknown. HTTP requests will be aborted.")
+        return
+    }
+
     if (relayServerScriptId.current) {
         return
     }
@@ -368,7 +412,6 @@ function init() {
 
     RFIDScanner.start(handleRFIDRead);
 
-    checkWifiStatus()
     checkWSStatus()
 }
 

@@ -4,6 +4,7 @@ var wsPingTimer = { current: null };
 var wsPongReceived = { current: true };
 var wsPingTimedOut = { current: false };
 var playingTones = { current: false };
+var cardReadResponseTimeout = { current: false };
 var relayIP = "192.168.33.1";
 function callNext() {
     var call = shellyCallsQueue[0];
@@ -119,6 +120,14 @@ function handleRFIDRead(tag) {
         print("Not connected to wifi. Ignoring the card.");
         return;
     }
+    if (cardReadResponseTimeout.current) {
+        print("Ignoring the card as another reading is still being processed.");
+        return;
+    }
+    // Cleared in _onDoorUnlock
+    cardReadResponseTimeout.current = Timer.set(5000, false, function () {
+        cardReadResponseTimeout.current = null;
+    });
     if (wsStatus.connected && !wsPingTimedOut.current) {
         // TO DO: don't notify through all RPC channels
         Shelly.emitEvent("card_read", {
@@ -153,6 +162,8 @@ function playTones(tones, then) {
 }
 function _onDoorUnlock(result) {
     print("Door unlock result: ", result);
+    Timer.clear(cardReadResponseTimeout.current);
+    cardReadResponseTimeout.current = null;
     // SHow LED/buzz indication
     try {
         switch (result) {
@@ -281,7 +292,6 @@ function init() {
     Shelly.addEventHandler(dispatchEvent);
     Shelly.addStatusHandler(dispatchStatus);
     RFIDScanner.start(handleRFIDRead);
-    checkWifiStatus();
     checkWSStatus();
 }
 init();

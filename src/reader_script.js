@@ -3,9 +3,8 @@ var relayServerScriptId = { current: null };
 var wsPingTimer = { current: null };
 var wsPongReceived = { current: true };
 var wsPingTimedOut = { current: false };
-var playingTones = { current: false };
+var toneTimer = { current: null };
 var cardReadResponseTimeout = { current: false };
-var relayIP = "192.168.33.1";
 function callNext() {
     var call = shellyCallsQueue[0];
     if (!call) {
@@ -34,12 +33,31 @@ function enqueueShellyCall(method, params, callback) {
         callNext();
     }
 }
+function getRelayIP() {
+    var wifiStatus = Shelly.getComponentStatus("Wifi");
+    var staIP = wifiStatus === null || wifiStatus === void 0 ? void 0 : wifiStatus.sta_ip;
+    print("Got sta ip: ", staIP);
+    if (!staIP) {
+        return null;
+    }
+    var lastDotIndex = staIP.lastIndexOf(".");
+    if (lastDotIndex === -1) {
+        print("lastDotIndex was -1.");
+        return;
+    }
+    return staIP.slice(0, lastDotIndex) + ".1";
+}
 function sendHTTPWithAuth(method, relative_uri, KVS, data, callback) {
+    var relayIP = getRelayIP();
+    if (!relayIP) {
+        print("IP of the relay is unknown. HTTP request aborted.");
+        return;
+    }
     if (!KVS.relay_password) {
         print("No password");
         return;
     }
-    var url = "http://admin:" + KVS.relay_password.value + "@" + relayIP + "/script/" + relayServerScriptId.current + relative_uri;
+    var url = "http://admin:" + KVS.relay_password.value + "@" + getRelayIP() + "/script/" + relayServerScriptId.current + relative_uri;
     var dataCopy = JSON.parse(JSON.stringify(data));
     dataCopy.url = url;
     dataCopy.ssl_ca = "*";
@@ -52,7 +70,14 @@ function checkWSStatus() {
         onWSConnect();
     }
 }
+function checkWifiStatus() {
+    var status = Shelly.getComponentStatus("Wifi");
+    if (status.status === "got ip") {
+        getRelayServerScriptId();
+    }
+}
 function onDisconnectFromBackend() {
+    indicateLED(false);
     getRelayServerScriptId();
 }
 function dispatchEvent(event) {
@@ -89,6 +114,7 @@ function onWSConnect() {
 function dispatchStatus(status) {
     print("Status change: ", JSON.stringify(status));
     if (status.component === "ws") {
+        indicateLED(status.delta.connected);
         if (status.delta.connected) {
             onWSConnect();
         }
@@ -98,7 +124,6 @@ function dispatchStatus(status) {
     }
 }
 function handleRFIDRead(tag) {
-    print("Scan card: ", tag);
     function onGotRelayUnlockResponse(response) {
         try {
             var responseData = JSON.parse(atob(response.body_b64));
@@ -113,50 +138,66 @@ function handleRFIDRead(tag) {
         var KVS = result.items;
         sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {}, onGotRelayUnlockResponse);
     }
-    var wsStatus = Shelly.getComponentStatus("WS");
-    var wifiStatus = Shelly.getComponentStatus("Wifi");
-    if (!wifiStatus.ssid) {
-        _onDoorUnlock("CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */);
-        print("Not connected to wifi. Ignoring the card.");
-        return;
-    }
-    if (cardReadResponseTimeout.current) {
-        print("Ignoring the card as another reading is still being processed.");
-        return;
-    }
-    // Cleared in _onDoorUnlock
-    cardReadResponseTimeout.current = Timer.set(5000, false, function () {
-        cardReadResponseTimeout.current = null;
-    });
-    if (wsStatus.connected && !wsPingTimedOut.current) {
-        // TO DO: don't notify through all RPC channels
-        Shelly.emitEvent("card_read", {
-            cardId: tag
+    try {
+        RGBSet(0, 12, 0xffff00);
+        var wsStatus_1 = Shelly.getComponentStatus("WS");
+        var wifiStatus = Shelly.getComponentStatus("Wifi");
+        playTones([
+            {
+                freq: 587,
+                duration: 150
+            }
+        ], function () {
+            indicateLED(wsStatus_1.connected);
         });
+        print("Scan card: ", tag);
+        if (!wifiStatus.ssid) {
+            _onDoorUnlock("CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */);
+            print("Not connected to wifi. Ignoring the card.");
+            return;
+        }
+        if (cardReadResponseTimeout.current) {
+            print("Ignoring the card as another reading is still being processed.");
+            return;
+        }
+        // Cleared in _onDoorUnlock or after a timeout
+        cardReadResponseTimeout.current = Timer.set(5000, false, function () {
+            cardReadResponseTimeout.current = null;
+        });
+        if (wsStatus_1.connected && !wsPingTimedOut.current) {
+            // TO DO: don't notify through all RPC channels
+            Shelly.emitEvent("card_read", {
+                cardId: tag
+            });
+        }
+        else {
+            // Make an HTTP request to the server on the relay
+            Shelly.call("KVS.GetMany", {}, onGotKVS);
+        }
     }
-    else {
-        // Make an HTTP request to the server on the relay
-        Shelly.call("KVS.GetMany", {}, onGotKVS);
+    catch (e) {
+        print("Faield to handle RFID reading: ", e);
     }
 }
 function playTones(tones, then) {
-    playingTones.current = true;
+    if (toneTimer.current) {
+        Timer.clear(toneTimer.current);
+    }
     function playTone(i) {
+        toneTimer.current = null;
         if (i >= tones.length) {
-            playingTones.current = false;
             PWMSet(2, 0, 0.5);
             then === null || then === void 0 ? void 0 : then();
             return;
         }
         var tone = tones[i];
         PWMSet(2, tone.freq, 0.5);
-        Timer.set(tone.duration, false, function () { return playTone(i + 1); });
+        toneTimer.current = Timer.set(tone.duration, false, function () { return playTone(i + 1); });
     }
     try {
         playTone(0);
     }
     catch (e) {
-        playingTones.current = false;
         print("Failed to play tones: ", e);
     }
 }
@@ -188,34 +229,11 @@ function _onDoorUnlock(result) {
                         duration: 150
                     }
                 ], function () {
-                    RGBSet(0, 12, 0xFFFFFF);
+                    indicateLED();
                 });
                 break;
             }
-            case "CARD_ADDED" /* UNLOCK_RESULT.CARD_ADDED */: {
-                // RGBSet(0, 12, 0xFFff00);
-                // playTones([
-                //     {
-                //         freq: 587,
-                //         duration: 150
-                //     },
-                //     {
-                //         freq: 784,
-                //         duration: 150
-                //     },
-                //     {
-                //         freq: 1175,
-                //         duration: 150
-                //     },
-                //     {
-                //         freq: 1568,
-                //         duration: 300
-                //     }
-                // ], () => {
-                //     RGBSet(0, 12, 0xFFFFFF);
-                // })
-                // break;
-            }
+            case "CARD_ADDED" /* UNLOCK_RESULT.CARD_ADDED */:
             case "CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */: {
                 // Play sad sound (single E note in the 4th octave twice) and set color to red
                 RGBSet(0, 12, 0xFF0000);
@@ -233,7 +251,7 @@ function _onDoorUnlock(result) {
                         duration: 250
                     }
                 ], function () {
-                    RGBSet(0, 12, 0xFFFFFF);
+                    indicateLED();
                 });
                 break;
             }
@@ -249,6 +267,11 @@ function _ping() {
 }
 // Looks for a script named "readers", which is running on the relay, and stores it in relayServerScriptId
 function getRelayServerScriptId() {
+    var relayIP = getRelayIP();
+    if (!relayIP) {
+        print("IP of the relay is unknown. HTTP requests will be aborted.");
+        return;
+    }
     if (relayServerScriptId.current) {
         return;
     }
@@ -273,14 +296,21 @@ function getRelayServerScriptId() {
     }
     enqueueShellyCall("KVS.Get", { key: "relay_password" }, function (relay_password) {
         enqueueShellyCall("HTTP.GET", {
-            url: "http://admin:" + relay_password.value + "@" + "192.168.33.1/rpc/Script.List",
+            url: "http://admin:" + relay_password.value + "@" + relayIP + "/rpc/Script.List",
             ssl_ca: "*"
         }, onGotScripts);
     });
 }
-function indicateLED() {
+function indicateLED(online) {
+    var _a;
+    if (online === void 0) { online = null; }
     try {
-        RGBSet(0, 12, 0xffffff);
+        // Lights up in different colors depending on whether connected to backend
+        if (online === null) {
+            online = (_a = Shelly.getComponentStatus("WS")) === null || _a === void 0 ? void 0 : _a.connected;
+        }
+        print("Indicate LED. ws status: ", online);
+        RGBSet(0, 12, online ? 0xffffff : 0x0000ff);
     }
     catch (e) {
         print("Failed to run 'indicateLED': ", e);
@@ -292,6 +322,7 @@ function init() {
     Shelly.addEventHandler(dispatchEvent);
     Shelly.addStatusHandler(dispatchStatus);
     RFIDScanner.start(handleRFIDRead);
+    checkWifiStatus();
     checkWSStatus();
 }
 init();

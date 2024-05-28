@@ -11,8 +11,8 @@ const relayServerScriptId: Ref = { current: null }
 const wsPingTimer: Ref<number> = { current: null }
 const wsPongReceived: Ref<boolean> = { current: true }
 const wsPingTimedOut: Ref<boolean> = { current: false }
-const playingTones: Ref = { current: false }
-const cardReadResponseTimeout: Ref = {current: false}
+const toneTimer: Ref = { current: null }
+const cardReadResponseTimeout: Ref = { current: false }
 
 function callNext() {
     const call = shellyCallsQueue[0]
@@ -53,14 +53,15 @@ function enqueueShellyCall(method: Shelly.Method, params?: any, callback?: Shell
 function getRelayIP() {
     const wifiStatus = Shelly.getComponentStatus("Wifi")
     const staIP = wifiStatus?.sta_ip
+    print("Got sta ip: ", staIP)
 
-    if(!staIP) {
+    if (!staIP) {
         return null
     }
 
     const lastDotIndex = staIP.lastIndexOf(".")
 
-    if(lastDotIndex === -1) {
+    if (lastDotIndex === -1) {
         print("lastDotIndex was -1.")
         return
     }
@@ -71,7 +72,7 @@ function getRelayIP() {
 function sendHTTPWithAuth(method: `HTTP.${HTTPServer.Method}`, relative_uri: string, KVS: KVS, data: any, callback?: (response: HTTPServer.Response) => void) {
     const relayIP = getRelayIP()
 
-    if(!relayIP) {
+    if (!relayIP) {
         print("IP of the relay is unknown. HTTP request aborted.")
         return
     }
@@ -100,8 +101,17 @@ function checkWSStatus() {
     }
 }
 
+function checkWifiStatus() {
+    const status = Shelly.getComponentStatus("Wifi")
+
+    if (status.status === "got ip") {
+        getRelayServerScriptId()
+    }
+}
+
 
 function onDisconnectFromBackend() {
+    indicateLED(false)
     getRelayServerScriptId()
 }
 
@@ -150,6 +160,8 @@ function dispatchStatus(status: Shelly.StatusChangeEvent) {
     print("Status change: ", JSON.stringify(status))
 
     if (status.component === "ws") {
+        indicateLED(status.delta.connected)
+
         if (status.delta.connected) {
             onWSConnect()
         }
@@ -161,7 +173,6 @@ function dispatchStatus(status: Shelly.StatusChangeEvent) {
 
 
 function handleRFIDRead(tag: string) {
-    print("Scan card: ", tag);
 
     function onGotRelayUnlockResponse(response: HTTPServer.Response) {
         try {
@@ -182,34 +193,54 @@ function handleRFIDRead(tag: string) {
 
     }
 
-    const wsStatus = Shelly.getComponentStatus("WS")
-    const wifiStatus = Shelly.getComponentStatus("Wifi")
+    try {
+        RGBSet(0, 12, 0xffff00);
 
-    if (!wifiStatus.ssid) {
-        _onDoorUnlock(UNLOCK_RESULT.CARD_DECLINED)
-        print("Not connected to wifi. Ignoring the card.")
-        return
-    }
+        const wsStatus = Shelly.getComponentStatus("WS")
+        const wifiStatus = Shelly.getComponentStatus("Wifi")
 
-    if(cardReadResponseTimeout.current) {
-        print("Ignoring the card as another reading is still being processed.")
-        return
-    }
-
-    // Cleared in _onDoorUnlock or after a timeout
-    cardReadResponseTimeout.current = Timer.set(5000, false, () => {
-        cardReadResponseTimeout.current = null
-    })
-
-    if (wsStatus.connected && !wsPingTimedOut.current) {
-        // TO DO: don't notify through all RPC channels
-        Shelly.emitEvent("card_read", {
-            cardId: tag
+        playTones([
+            {
+                freq: 587,
+                duration: 150
+            }
+        ], () => {
+            indicateLED(wsStatus.connected)
         })
+        print("Scan card: ", tag);
+
+
+
+        if (!wifiStatus.ssid) {
+            _onDoorUnlock(UNLOCK_RESULT.CARD_DECLINED)
+            print("Not connected to wifi. Ignoring the card.")
+            return
+        }
+
+        if (cardReadResponseTimeout.current) {
+            print("Ignoring the card as another reading is still being processed.")
+            return
+        }
+
+        // Cleared in _onDoorUnlock or after a timeout
+        cardReadResponseTimeout.current = Timer.set(5000, false, () => {
+            cardReadResponseTimeout.current = null
+        })
+
+        if (wsStatus.connected && !wsPingTimedOut.current) {
+            // TO DO: don't notify through all RPC channels
+            Shelly.emitEvent("card_read", {
+                cardId: tag
+            })
+        }
+        else {
+            // Make an HTTP request to the server on the relay
+            Shelly.call("KVS.GetMany", {}, onGotKVS)
+        }
+
     }
-    else {
-        // Make an HTTP request to the server on the relay
-        Shelly.call("KVS.GetMany", {}, onGotKVS)
+    catch (e) {
+        print("Faield to handle RFID reading: ", e)
     }
 }
 
@@ -226,11 +257,14 @@ type Tone = {
 }
 
 function playTones(tones: Tone[], then?: () => void) {
-    playingTones.current = true
+    if (toneTimer.current) {
+        Timer.clear(toneTimer.current)
+    }
 
     function playTone(i: number) {
+        toneTimer.current = null
+
         if (i >= tones.length) {
-            playingTones.current = false
             PWMSet(2, 0, 0.5);
             then?.()
             return
@@ -238,14 +272,13 @@ function playTones(tones: Tone[], then?: () => void) {
 
         const tone = tones[i]
         PWMSet(2, tone.freq, 0.5);
-        Timer.set(tone.duration, false, () => playTone(i + 1))
+        toneTimer.current = Timer.set(tone.duration, false, () => playTone(i + 1))
     }
 
     try {
         playTone(0)
     }
     catch (e) {
-        playingTones.current = false
         print("Failed to play tones: ", e)
     }
 }
@@ -281,37 +314,12 @@ function _onDoorUnlock(result: UNLOCK_RESULT) {
                         duration: 150
                     }
                 ], () => {
-                    RGBSet(0, 12, 0xFFFFFF);
+                    indicateLED()
                 })
 
                 break;
             }
-            case UNLOCK_RESULT.CARD_ADDED: {
-                // RGBSet(0, 12, 0xFFff00);
-
-                // playTones([
-                //     {
-                //         freq: 587,
-                //         duration: 150
-                //     },
-                //     {
-                //         freq: 784,
-                //         duration: 150
-                //     },
-                //     {
-                //         freq: 1175,
-                //         duration: 150
-                //     },
-                //     {
-                //         freq: 1568,
-                //         duration: 300
-                //     }
-                // ], () => {
-                //     RGBSet(0, 12, 0xFFFFFF);
-                // })
-
-                // break;
-            }
+            case UNLOCK_RESULT.CARD_ADDED:
             case UNLOCK_RESULT.CARD_DECLINED: {
                 // Play sad sound (single E note in the 4th octave twice) and set color to red
                 RGBSet(0, 12, 0xFF0000);
@@ -330,7 +338,7 @@ function _onDoorUnlock(result: UNLOCK_RESULT) {
                         duration: 250
                     }
                 ], () => {
-                    RGBSet(0, 12, 0xFFFFFF);
+                    indicateLED()
                 })
 
                 break;
@@ -351,7 +359,7 @@ function _ping() {
 function getRelayServerScriptId() {
     const relayIP = getRelayIP()
 
-    if(!relayIP) {
+    if (!relayIP) {
         print("IP of the relay is unknown. HTTP requests will be aborted.")
         return
     }
@@ -388,15 +396,20 @@ function getRelayServerScriptId() {
 
     enqueueShellyCall("KVS.Get", { key: "relay_password" }, function (relay_password) {
         enqueueShellyCall("HTTP.GET", {
-            url: "http://admin:" + relay_password.value + "@" + "192.168.33.1/rpc/Script.List",
+            url: "http://admin:" + relay_password.value + "@" + relayIP + "/rpc/Script.List",
             ssl_ca: "*"
         }, onGotScripts)
     })
 }
 
-function indicateLED() {
+function indicateLED(online: boolean = null) {
     try {
-        RGBSet(0, 12, 0xffffff);
+        // Lights up in different colors depending on whether connected to backend
+        if(online === null) {
+            online = Shelly.getComponentStatus("WS")?.connected
+        }
+        print("Indicate LED. ws status: ", online)
+        RGBSet(0, 12, online ? 0xffffff : 0x0000ff);
     }
     catch (e) {
         print("Failed to run 'indicateLED': ", e);
@@ -412,6 +425,7 @@ function init() {
 
     RFIDScanner.start(handleRFIDRead);
 
+    checkWifiStatus()
     checkWSStatus()
 }
 

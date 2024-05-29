@@ -5,6 +5,7 @@ var wsPongReceived = { current: true };
 var wsPingTimedOut = { current: false };
 var toneTimer = { current: null };
 var cardReadResponseTimeout = { current: false };
+var indicatingCardRead = { current: false };
 function callNext() {
     var call = shellyCallsQueue[0];
     if (!call) {
@@ -100,13 +101,14 @@ function onWSConnect() {
     wsPingTimer.current = Timer.set(10000, true, function () {
         Shelly.emitEvent("ping", null);
         wsPongReceived.current = false;
-        Timer.set(2000, false, function () {
+        Timer.set(3000, false, function () {
+            wsPingTimedOut.current = !wsPongReceived.current;
+            if (!indicatingCardRead.current) {
+                indicateLED(wsPongReceived.current);
+            }
             if (wsPongReceived.current) {
                 return;
             }
-            Timer.clear(wsPingTimer.current);
-            wsPingTimer.current = null;
-            wsPingTimedOut.current = true;
             onDisconnectFromBackend();
         });
     });
@@ -119,11 +121,14 @@ function dispatchStatus(status) {
             onWSConnect();
         }
         else {
+            Timer.clear(wsPingTimer.current);
+            wsPingTimer.current = null;
             onDisconnectFromBackend();
         }
     }
 }
 function handleRFIDRead(tag) {
+    print("Scan card: ", tag);
     function onGotRelayUnlockResponse(response) {
         try {
             var responseData = JSON.parse(atob(response.body_b64));
@@ -138,45 +143,46 @@ function handleRFIDRead(tag) {
         var KVS = result.items;
         sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {}, onGotRelayUnlockResponse);
     }
+    var wsStatus = Shelly.getComponentStatus("WS");
+    var wifiStatus = Shelly.getComponentStatus("Wifi");
     try {
         RGBSet(0, 12, 0xffff00);
-        var wsStatus_1 = Shelly.getComponentStatus("WS");
-        var wifiStatus = Shelly.getComponentStatus("Wifi");
+        indicatingCardRead.current = true;
         playTones([
             {
                 freq: 587,
                 duration: 150
             }
         ], function () {
-            indicateLED(wsStatus_1.connected);
+            indicatingCardRead.current = false;
+            indicateLED(wsStatus.connected);
         });
-        print("Scan card: ", tag);
-        if (!wifiStatus.ssid) {
-            _onDoorUnlock("CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */);
-            print("Not connected to wifi. Ignoring the card.");
-            return;
-        }
-        if (cardReadResponseTimeout.current) {
-            print("Ignoring the card as another reading is still being processed.");
-            return;
-        }
-        // Cleared in _onDoorUnlock or after a timeout
-        cardReadResponseTimeout.current = Timer.set(5000, false, function () {
-            cardReadResponseTimeout.current = null;
-        });
-        if (wsStatus_1.connected && !wsPingTimedOut.current) {
-            // TO DO: don't notify through all RPC channels
-            Shelly.emitEvent("card_read", {
-                cardId: tag
-            });
-        }
-        else {
-            // Make an HTTP request to the server on the relay
-            Shelly.call("KVS.GetMany", {}, onGotKVS);
-        }
     }
     catch (e) {
-        print("Faield to handle RFID reading: ", e);
+        print("Failed to indicate RFID reading: ", e);
+    }
+    if (!wifiStatus.ssid) {
+        _onDoorUnlock("CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */);
+        print("Not connected to wifi. Ignoring the card.");
+        return;
+    }
+    if (cardReadResponseTimeout.current) {
+        print("Ignoring the card as another reading is still being processed.");
+        return;
+    }
+    // Cleared in _onDoorUnlock or after a timeout
+    cardReadResponseTimeout.current = Timer.set(5000, false, function () {
+        cardReadResponseTimeout.current = null;
+    });
+    if (wsStatus.connected && !wsPingTimedOut.current) {
+        // TO DO: don't notify through all RPC channels
+        Shelly.emitEvent("card_read", {
+            cardId: tag
+        });
+    }
+    else {
+        // Make an HTTP request to the server on the relay
+        Shelly.call("KVS.GetMany", {}, onGotKVS);
     }
 }
 function playTones(tones, then) {
@@ -203,6 +209,7 @@ function playTones(tones, then) {
 }
 function _onDoorUnlock(result) {
     print("Door unlock result: ", result);
+    indicatingCardRead.current = true;
     Timer.clear(cardReadResponseTimeout.current);
     cardReadResponseTimeout.current = null;
     // SHow LED/buzz indication
@@ -229,6 +236,7 @@ function _onDoorUnlock(result) {
                         duration: 150
                     }
                 ], function () {
+                    indicatingCardRead.current = false;
                     indicateLED();
                 });
                 break;
@@ -251,6 +259,7 @@ function _onDoorUnlock(result) {
                         duration: 250
                     }
                 ], function () {
+                    indicatingCardRead.current = false;
                     indicateLED();
                 });
                 break;

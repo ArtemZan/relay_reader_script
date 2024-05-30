@@ -230,20 +230,31 @@ function handleRFIDRead(tag: string) {
         return
     }
 
-    // Cleared in _onDoorUnlock or after a timeout
-    cardReadResponseTimeout.current = Timer.set(5000, false, () => {
-        cardReadResponseTimeout.current = null
-    })
+    function readOffline() {
+        cardReadResponseTimeout.current = Timer.set(5000, false, () => {
+            cardReadResponseTimeout.current = null
+        })
 
+        // Make an HTTP request to the server on the relay
+        Shelly.call("KVS.GetMany", {}, onGotKVS)
+    }
+    
     if (wsStatus.connected && !wsPingTimedOut.current) {
+        // Cleared in _onDoorUnlock or after a timeout
+        cardReadResponseTimeout.current = Timer.set(3000, false, () => {
+            cardReadResponseTimeout.current = null
+            wsPingTimedOut.current = true
+            
+            readOffline()
+        })
+
         // TO DO: don't notify through all RPC channels
         Shelly.emitEvent("card_read", {
             cardId: tag
         })
     }
     else {
-        // Make an HTTP request to the server on the relay
-        Shelly.call("KVS.GetMany", {}, onGotKVS)
+        readOffline()
     }
 }
 

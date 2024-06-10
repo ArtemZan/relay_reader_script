@@ -70,7 +70,7 @@ function getRelayIP() {
     return staIP.slice(0, lastDotIndex) + ".1"
 }
 
-function sendHTTPWithAuth(method: `HTTP.${HTTPServer.Method}`, relative_uri: string, KVS: KVS, data: any, callback?: (response: HTTPServer.Response) => void) {
+function sendHTTPWithAuth(method: `HTTP.${HTTPServer.Method}`, relative_uri: string, relay_password: string, data: any, callback?: (response: HTTPServer.Response) => void) {
     const relayIP = getRelayIP()
 
     if (!relayIP) {
@@ -78,12 +78,12 @@ function sendHTTPWithAuth(method: `HTTP.${HTTPServer.Method}`, relative_uri: str
         return
     }
 
-    if (!KVS.relay_password) {
+    if (!relay_password) {
         print("No password")
         return
     }
 
-    const url = "http://admin:" + KVS.relay_password.value + "@" + getRelayIP() + "/script/" + relayServerScriptId.current + relative_uri
+    const url = "http://admin:" + relay_password + "@" + getRelayIP() + "/script/" + relayServerScriptId.current + relative_uri
 
     const dataCopy = JSON.parse(JSON.stringify(data))
     dataCopy.url = url
@@ -108,6 +108,18 @@ function checkWifiStatus() {
     if (status.status === "got ip") {
         getRelayServerScriptId()
     }
+}
+
+
+function logTime() {
+    enqueueShellyCall("Sys.GetStatus", null, (sys) => {
+        try {
+            print("Current time: ", sys.time, ", unixtime: ", sys.unixtime, ", uptime: ", sys.uptime);
+        }
+        catch(e) {
+            print("Failed to log time: ", e);
+        }
+    })
 }
 
 
@@ -178,6 +190,7 @@ function dispatchStatus(status: Shelly.StatusChangeEvent) {
 
 function handleRFIDRead(tag: string) {
     print("Scan card: ", tag);
+    logTime();
 
     function onGotRelayUnlockResponse(response: HTTPServer.Response) {
         try {
@@ -191,10 +204,8 @@ function handleRFIDRead(tag: string) {
         }
     }
 
-    function onGotKVS(result: { items: KVS }) {
-        const KVS = result.items
-
-        sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {}, onGotRelayUnlockResponse)
+    function onGotKVS(result: KVS[string]) {
+        sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, result?.value, {}, onGotRelayUnlockResponse)
 
     }
 
@@ -212,7 +223,7 @@ function handleRFIDRead(tag: string) {
             }
         ], () => {
             indicatingCardRead.current = false;
-            indicateLED(wsStatus.connected)
+            indicateLED()
         })
     }
     catch (e) {
@@ -236,7 +247,9 @@ function handleRFIDRead(tag: string) {
         })
 
         // Make an HTTP request to the server on the relay
-        Shelly.call("KVS.GetMany", {}, onGotKVS)
+        Shelly.call("KVS.Get", {
+            key: "relay_password"
+        }, onGotKVS)
     }
     
     if (wsStatus.connected && !wsPingTimedOut.current) {
@@ -420,10 +433,12 @@ function getRelayServerScriptId() {
 }
 
 function indicateLED(online: boolean = null) {
+    logTime();
+
     try {
         // Lights up in different colors depending on whether connected to backend
         if (online === null) {
-            online = Shelly.getComponentStatus("WS")?.connected
+            online = Shelly.getComponentStatus("WS")?.connected && !wsPingTimedOut.current
         }
         print("Indicate LED. ws status: ", online)
         RGBSet(0, 12, online ? 0xffffff : 0x0000ff);

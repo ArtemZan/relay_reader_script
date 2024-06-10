@@ -1,36 +1,54 @@
 // Shelly Access Control BLU button scanner
 // ver 1.11
 
-var shellyCallsQueue = [];
+type KVS = { [key: string]: { value: any } }
+
+// Used to detect changes in KVS
+const prevKVS: KVS = {}
+
+type ShellyCall = [Shelly.Method, any, Shelly.MethodCallback]
+
+const shellyCallsQueue: ShellyCall[] = []
+
+const wsConnected = { current: false }
 
 function callNext() {
-    var call = shellyCallsQueue[0];
+    const call = shellyCallsQueue[0]
     if (!call) {
-        return;
+        return
     }
-    function onComplete(result) {
-        print("onComplete");
+
+    function onComplete(result: any) {
+        print("onComplete")
+
         if (call[2]) {
             try {
-                print("Calling callback for: ", call[0], "with result: ", JSON.stringify(result));
-                call[2](result);
+                print("Calling callback for: ", call[0], "with result: ", JSON.stringify(result))
+                call[2](result)
             }
             catch (e) {
-                print("Shelly call caught an error: ", e);
+                print("Shelly call caught an error: ", e)
             }
         }
-        print("pop the call from queue. Calls left: ", shellyCallsQueue.length);
-        shellyCallsQueue.splice(0, 1);
-        callNext();
+
+        print("pop the call from queue. Calls left: ", shellyCallsQueue.length)
+
+        shellyCallsQueue.splice(0, 1)
+        callNext()
     }
-    Shelly.call(call[0], call[1], onComplete);
+
+    Shelly.call(call[0], call[1], onComplete)
 }
-function enqueueShellyCall(method, params, callback) {
-    shellyCallsQueue.push([method, params, callback]);
+
+function enqueueShellyCall(method: Shelly.Method, params?: any, callback?: Shelly.MethodCallback) {
+    shellyCallsQueue.push([method, params, callback])
+
     if (shellyCallsQueue.length === 1) {
-        callNext();
+        callNext()
     }
 }
+
+type BufType = `${"U" | "I"}${"8" | "16" | "24"}` | "UUID"
 
 let BTHome = {
     SVC_ID: "fcd2",
@@ -58,49 +76,34 @@ let BTHome = {
         { i: 0x3f, n: "Rotation", t: "U16", f: 0.1 },
         { i: 0xff, n: "Identification", t: "UUID" }
     ],
-    utoi: function (num, bitsz) {
+    utoi: function (num: number, bitsz: number) {
         let mask = 1 << (bitsz - 1);
         return num & mask ? num - (1 << bitsz) : num;
     },
-    getUInt8: function (buffer) {
+    getUInt8: function (buffer: string) {
         return buffer.at(0);
     },
-    getInt8: function (buffer) {
+    getInt8: function (buffer: string) {
         return this.utoi(this.getUInt8(buffer), 8);
     },
-    getUInt16LE: function (buffer) {
-        return 0xffff & ((buffer.at(1) << 8) | buffer.at(0));
+    getUInt16LE: function (buffer: string) {
+        return 0xffff & (((buffer.at(1) as unknown as number) << 8) | (buffer.at(0) as unknown as number));
     },
-    getInt16LE: function (buffer) {
+    getInt16LE: function (buffer: string) {
         return this.utoi(this.getUInt16LE(buffer), 16);
     },
-    getUInt24LE: function (buffer) {
+    getUInt24LE: function (buffer: string) {
         return (
-            0x00ffffff & ((buffer.at(2) << 16) | (buffer.at(1) << 8) | buffer.at(0))
+            0x00ffffff & (((buffer.at(2) as unknown as number) << 16) | ((buffer.at(1) as unknown as number) << 8) | (buffer.at(0) as unknown as number))
         );
     },
-    getInt24LE: function (buffer) {
+    getInt24LE: function (buffer: string) {
         return this.utoi(this.getUInt24LE(buffer), 24);
     },
-    halfByteToHexString: function (halfByte) {
-        if (halfByte === 0) return "0";
-        if (halfByte === 1) return "1";
-        if (halfByte === 2) return "2";
-        if (halfByte === 3) return "3";
-        if (halfByte === 4) return "4";
-        if (halfByte === 5) return "5";
-        if (halfByte === 6) return "6";
-        if (halfByte === 7) return "7";
-        if (halfByte === 8) return "8";
-        if (halfByte === 9) return "9";
-        if (halfByte === 10) return "a";
-        if (halfByte === 11) return "b";
-        if (halfByte === 12) return "c";
-        if (halfByte === 13) return "d";
-        if (halfByte === 14) return "e";
-        if (halfByte === 15) return "f";
+    halfByteToHexString: function (halfByte: number) {
+        return halfByte.toString(16)
     },
-    getUUID: function (buffer) {
+    getUUID: function (buffer: string) {
         let result = "";
         for (let i = 0; i < 16; i++) {
             let byte = buffer.charCodeAt(i);
@@ -111,13 +114,13 @@ let BTHome = {
         }
         return result;
     },
-    findMeasurementType: function (mid) {
+    findMeasurementType: function (mid: any) {
         for (let i in this.M) {
             if (this.M[i].i === mid) return this.M[i];
         }
         return null;
     },
-    getBufValue: function (type, buffer) {
+    getBufValue: function (type: BufType, buffer: string) {
         if (buffer.length < this.T.getByteSize(type)) return null;
         if (type === "U8") return this.getUInt8(buffer);
         if (type === "I8") return this.getInt8(buffer);
@@ -128,7 +131,7 @@ let BTHome = {
         if (type === "UUID") return this.getUUID(buffer);
         return null;
     },
-    unpack: function (buffer) {
+    unpack: function (buffer: string) {
         // beacons might not provide BTH service data
         if (typeof buffer !== "string" || buffer.length === 0) return null;
         let result = {};
@@ -156,9 +159,9 @@ let BTHome = {
     },
 };
 
-let iosPackets = {};
+let iosPackets: any = {};
 
-function handleScanEvent(ev, res) {
+function handleScanEvent(ev: BLE.Scanner.ScanEvent, res: BLE.Scanner.ScanResult) {
     if (ev !== BLE.Scanner.SCAN_RESULT) return;
     // 0.14 doesn't support .startsWith and .substring
     if (res.service_uuids !== undefined && typeof res.local_name === "string" && res.local_name.indexOf("iOS") === 0) {
@@ -379,8 +382,7 @@ function handleBluetoothButton(eventData) {
     enqueueShellyCall("KVS.Get", { key: "bms/i/" + buttonId }, checkButton, { buttonId: buttonId, rssi: eventData["info"]["data"]["rssi"] });
 }
 
-function handleKVSPhysicalButtonFetch(response) {
-    let items = response["items"];
+function handleKVSPhysicalButtonFetch(items: KVS) {
     if (items === undefined) {
         return;
     }
@@ -396,14 +398,19 @@ function handleKVSPhysicalButtonFetch(response) {
     }
 }
 
-function handlePhysicalButton(eventData) {
-    if (Shelly.getComponentStatus("ws").connected) {
+function handlePhysicalButton(_eventData: Shelly.Event) {
+    if (Shelly.getComponentStatus("WS").connected) {
         return;
     }
+
+    getKVSForKeys([
+        "bms/cfg/is_emergency"
+    ], handleKVSPhysicalButtonFetch)
+
     enqueueShellyCall("KVS.GetMany", { match: "bms/cfg/*" }, handleKVSPhysicalButtonFetch);
 }
 
-function dispatchEvent(eventData) {
+function dispatchEvent(eventData: Shelly.Event) {
     if (eventData === undefined || eventData["info"] === undefined || eventData["info"]["event"] === undefined) {
         return;
     }
@@ -415,10 +422,8 @@ function dispatchEvent(eventData) {
     }
 }
 
-function handleKVSStatusFetch(response, _errorCode, _errorMessage, statusData) {
-    statusData = JSON.parse(statusData)
-    let items = response["items"];
-
+function handleKVSStatusFetch(items: KVS, statusDataJSON: string) {
+    const statusData: Shelly.StatusChangeEvent = JSON.parse(statusDataJSON)
     print("handleKVSStatusFetch: ", items, statusData)
 
     if (items === undefined) {
@@ -448,7 +453,7 @@ function handleKVSStatusFetch(response, _errorCode, _errorMessage, statusData) {
 
     let isClosed = permanentState !== "DISARMED" && defaultLockState === "CLOSED";
 
-    if (!Shelly.getComponentStatus("ws").connected && statusData["delta"]["output"] === isClosed) {
+    if (!Shelly.getComponentStatus("WS").connected && statusData["delta"]["output"] === isClosed) {
         saveClose();
     }
 
@@ -457,34 +462,34 @@ function handleKVSStatusFetch(response, _errorCode, _errorMessage, statusData) {
     }
 }
 
-function getKVSOneByOne(keys, callback, callbackParam) {
-    const items = {}
+function getKVSForKeys(keys: string[], callback: (items: KVS, param?: any) => void, callbackParam?: any) {
+    const items: KVS = {}
 
-    for(const i in keys) {
+    for (const i in keys) {
         const key = keys[i]
         enqueueShellyCall("KVS.Get", {
             key
         }, function (result) {
             items[key] = result
 
-            if(Number(i) === keys.length - 1) {
+            if (Number(i) === keys.length - 1) {
                 callback(items, callbackParam)
             }
         })
     }
 }
 
-function dispatchStatus(statusData) {
+function dispatchStatus(statusData: Shelly.StatusChangeEvent) {
     //     if (Shelly.getComponentStatus("ws").connected) {
     //         return;
     //     }
 
-    if(statusData.component && statusData.component.indexOf("switch:") === 0) {
-        getKVSOneByOne([
+    if (statusData.component && statusData.component.indexOf("switch:") === 0) {
+        getKVSForKeys([
             "bms/cfg/input",
             "bms/cfg/permanent_state",
             "bms/cfg/default_lock_state",
-            "bms/cfg/has_second_switch" 
+            "bms/cfg/has_second_switch"
         ], handleKVSStatusFetch, JSON.stringify(statusData));
     }
 }

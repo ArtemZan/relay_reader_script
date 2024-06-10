@@ -48,17 +48,17 @@ function getRelayIP() {
     }
     return staIP.slice(0, lastDotIndex) + ".1";
 }
-function sendHTTPWithAuth(method, relative_uri, KVS, data, callback) {
+function sendHTTPWithAuth(method, relative_uri, relay_password, data, callback) {
     var relayIP = getRelayIP();
     if (!relayIP) {
         print("IP of the relay is unknown. HTTP request aborted.");
         return;
     }
-    if (!KVS.relay_password) {
+    if (!relay_password) {
         print("No password");
         return;
     }
-    var url = "http://admin:" + KVS.relay_password.value + "@" + getRelayIP() + "/script/" + relayServerScriptId.current + relative_uri;
+    var url = "http://admin:" + relay_password + "@" + getRelayIP() + "/script/" + relayServerScriptId.current + relative_uri;
     var dataCopy = JSON.parse(JSON.stringify(data));
     dataCopy.url = url;
     dataCopy.ssl_ca = "*";
@@ -76,6 +76,16 @@ function checkWifiStatus() {
     if (status.status === "got ip") {
         getRelayServerScriptId();
     }
+}
+function logTime() {
+    enqueueShellyCall("Sys.GetStatus", null, function (sys) {
+        try {
+            print("Current time: ", sys.time, ", unixtime: ", sys.unixtime, ", uptime: ", sys.uptime);
+        }
+        catch (e) {
+            print("Failed to log time: ", e);
+        }
+    });
 }
 function onDisconnectFromBackend() {
     indicateLED(false);
@@ -129,6 +139,7 @@ function dispatchStatus(status) {
 }
 function handleRFIDRead(tag) {
     print("Scan card: ", tag);
+    logTime();
     function onGotRelayUnlockResponse(response) {
         try {
             var responseData = JSON.parse(atob(response.body_b64));
@@ -140,8 +151,7 @@ function handleRFIDRead(tag) {
         }
     }
     function onGotKVS(result) {
-        var KVS = result.items;
-        sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, KVS, {}, onGotRelayUnlockResponse);
+        sendHTTPWithAuth("HTTP.GET", "/open_relay_with_rfid?cardId=" + tag, result === null || result === void 0 ? void 0 : result.value, {}, onGotRelayUnlockResponse);
     }
     var wsStatus = Shelly.getComponentStatus("WS");
     var wifiStatus = Shelly.getComponentStatus("Wifi");
@@ -155,7 +165,7 @@ function handleRFIDRead(tag) {
             }
         ], function () {
             indicatingCardRead.current = false;
-            indicateLED(wsStatus.connected);
+            indicateLED();
         });
     }
     catch (e) {
@@ -175,7 +185,9 @@ function handleRFIDRead(tag) {
             cardReadResponseTimeout.current = null;
         });
         // Make an HTTP request to the server on the relay
-        Shelly.call("KVS.GetMany", {}, onGotKVS);
+        Shelly.call("KVS.Get", {
+            key: "relay_password"
+        }, onGotKVS);
     }
     if (wsStatus.connected && !wsPingTimedOut.current) {
         // Cleared in _onDoorUnlock or after a timeout
@@ -321,10 +333,11 @@ function getRelayServerScriptId() {
 function indicateLED(online) {
     var _a;
     if (online === void 0) { online = null; }
+    logTime();
     try {
         // Lights up in different colors depending on whether connected to backend
         if (online === null) {
-            online = (_a = Shelly.getComponentStatus("WS")) === null || _a === void 0 ? void 0 : _a.connected;
+            online = ((_a = Shelly.getComponentStatus("WS")) === null || _a === void 0 ? void 0 : _a.connected) && !wsPingTimedOut.current;
         }
         print("Indicate LED. ws status: ", online);
         RGBSet(0, 12, online ? 0xffffff : 0x0000ff);

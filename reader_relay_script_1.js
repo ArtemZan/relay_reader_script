@@ -1,5 +1,3 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
 // Used to detect changes in KVS
 var prevKVS = {};
 var shellyCallsQueue = [];
@@ -32,16 +30,6 @@ function enqueueShellyCall(method, params, callback) {
         callNext();
     }
 }
-function logTime() {
-    enqueueShellyCall("Sys.GetStatus", null, function (sys) {
-        try {
-            print("Current time: ", sys.time, ", unixtime: ", sys.unixtime, ", uptime: ", sys.uptime);
-        }
-        catch (e) {
-            print("Failed to log time: ", e);
-        }
-    });
-}
 function dispatchEvent(event) {
     print("============================================Event: ", JSON.stringify(event));
     var eventName = event.info.event;
@@ -50,7 +38,6 @@ function dispatchEvent(event) {
     }
 }
 function turnTheSwitch(KVS) {
-    logTime();
     if (!KVS["bms/cfg/default_lock_state"] || !KVS["bms/cfg/default_lock_state"].value) {
         return;
     }
@@ -72,7 +59,6 @@ function turnTheSwitch(KVS) {
     });
 }
 function onReadCard(card_id, KVS) {
-    logTime();
     var cardKVSEntry = KVS["bms/i/" + card_id];
     if (!cardKVSEntry) {
         return "CARD_DECLINED" /* UNLOCK_RESULT.CARD_DECLINED */;
@@ -90,23 +76,23 @@ function onReadCard(card_id, KVS) {
     turnTheSwitch(KVS);
     return "DOOR_UNLOCKED" /* UNLOCK_RESULT.DOOR_UNLOCKED */;
 }
-// function onGotKVSOnDispatchStatus(result: {items: KVS}) {
-//     const KVS = result.items
-//     function handleKVSChange(key: string, callback: (newValue: string) => void) {
-//         const newValue = KVS[key] ? KVS[key].value : null
-//         if (prevKVS[key] !== newValue) {
-//             prevKVS[key] = newValue
-//             callback(newValue)
-//         }
-//     }
-//     function onAccepted(value?: string) {
-//         if (value) {
-//             turnTheSwitch(KVS)
-//             enqueueShellyCall("KVS.Delete", { key: "accepted" })
-//         }
-//     }
-//     handleKVSChange("accepted", onAccepted)
-// }
+function onGotKVSOnDispatchStatus(result) {
+    var KVS = result.items;
+    function handleKVSChange(key, callback) {
+        var newValue = KVS[key] ? KVS[key].value : null;
+        if (prevKVS[key] !== newValue) {
+            prevKVS[key] = newValue;
+            callback(newValue);
+        }
+    }
+    function onAccepted(value) {
+        if (value) {
+            turnTheSwitch(KVS);
+            enqueueShellyCall("KVS.Delete", { key: "accepted" });
+        }
+    }
+    handleKVSChange("accepted", onAccepted);
+}
 function dispatchStatus(status) {
     print("============================================Status: ", JSON.stringify(status));
     if (status.component === "ws") {
@@ -115,11 +101,9 @@ function dispatchStatus(status) {
         }
         return;
     }
-    // if (status.component === "sys") {
-    //     enqueueShellyCall("KVS.GetMany", {
-    //         match: ""
-    //     }, onGotKVSOnDispatchStatus)
-    // }
+    if (status.component === "sys") {
+        enqueueShellyCall("KVS.GetMany", {}, onGotKVSOnDispatchStatus);
+    }
 }
 function configureWiFi() {
     Shelly.call("Wifi.SetConfig", {
@@ -143,9 +127,7 @@ function HTTPPostOpenRelayWithCard(request, response) {
     var query = parseQuery(request.query);
     print("=====================Read card: ");
     print(JSON.stringify(query));
-    enqueueShellyCall("KVS.GetMany", {
-        match: "bms/i/".concat(query.cardId, "|bms/cfg/default_lock_state|bms/cfg/timeout|bms/cfg/input")
-    }, function (result) {
+    enqueueShellyCall("KVS.GetMany", {}, function (result) {
         var status = onReadCard(query.cardId, result.items);
         response.code = 200;
         response.body = JSON.stringify({

@@ -1,5 +1,3 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
 // Used to detect changes in KVS
 var prevKVS = {};
 var shellyCallsQueue = [];
@@ -139,13 +137,35 @@ function parseQuery(query) {
     }
     return result;
 }
+function getKVSOneByOne(keys, onResolve) {
+    var kvs = {};
+    var index = 0;
+    function onGotItem(result) {
+        kvs[keys[index]] = result;
+        index++;
+        getKVSItem();
+    }
+    function getKVSItem() {
+        if (index === keys.length) {
+            onResolve(kvs);
+            return;
+        }
+        enqueueShellyCall("KVS.Get", {
+            key: keys[index]
+        }, onGotItem);
+    }
+}
 function HTTPPostOpenRelayWithCard(request, response) {
     var query = parseQuery(request.query);
     print("=====================Read card: ");
     print(JSON.stringify(query));
-    enqueueShellyCall("KVS.GetMany", {
-        match: "bms/i/".concat(query.cardId, "|bms/cfg/default_lock_state|bms/cfg/timeout|bms/cfg/input")
-    }, function (result) {
+    getKVSOneByOne([
+        "bms/i/".concat(query.cardId),
+        "bms/cfg/default_lock_state",
+        "bms/cfg/timeout",
+        "bms/cfg/input"
+    ], function (result) {
+        print(result);
         var status = onReadCard(query.cardId, result.items);
         response.code = 200;
         response.body = JSON.stringify({
@@ -153,6 +173,16 @@ function HTTPPostOpenRelayWithCard(request, response) {
         });
         response.send();
     });
+    // enqueueShellyCall("KVS.GetMany", {
+    //     match: `bms/i/${query.cardId}|bms/cfg/default_lock_state|bms/cfg/timeout|bms/cfg/input`
+    // }, function (result) {
+    //     const status = onReadCard(query.cardId, result.items)
+    //     response.code = 200
+    //     response.body = JSON.stringify({
+    //         status
+    //     })
+    //     response.send()
+    // })
 }
 function setupHTTPServer() {
     HTTPServer.registerEndpoint("open_relay_with_rfid", HTTPPostOpenRelayWithCard);

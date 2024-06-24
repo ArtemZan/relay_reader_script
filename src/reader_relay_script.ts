@@ -193,15 +193,40 @@ const enum UNLOCK_RESULT {
     CARD_ADDED = "CARD_ADDED"
 }
 
+function getKVSOneByOne(keys: string[], onResolve: (result: KVS) => void) {
+    const kvs: KVS = {}
+    let index = 0;
+    function onGotItem(result: KVS[string]) {
+        kvs[keys[index]] = result
+        index++;
+        
+        getKVSItem()
+    }
+
+    function getKVSItem() {
+        if(index === keys.length) {
+            onResolve(kvs);
+            return
+        }
+
+        enqueueShellyCall("KVS.Get", {
+            key: keys[index]
+        }, onGotItem)
+    }
+}
+
 function HTTPPostOpenRelayWithCard(request: HTTPServer.Request, response: HTTPServer.Response) {
     const query = parseQuery(request.query)
     print("=====================Read card: ")
     print(JSON.stringify(query))
 
-
-    enqueueShellyCall("KVS.GetMany", {
-        match: `bms/i/${query.cardId}|bms/cfg/default_lock_state|bms/cfg/timeout|bms/cfg/input`
-    }, function (result) {
+    getKVSOneByOne([
+        `bms/i/${query.cardId}`,
+        "bms/cfg/default_lock_state",
+        "bms/cfg/timeout",
+        "bms/cfg/input"
+    ], (result) => {
+        print(result)
         const status = onReadCard(query.cardId, result.items)
 
         response.code = 200
@@ -211,6 +236,19 @@ function HTTPPostOpenRelayWithCard(request: HTTPServer.Request, response: HTTPSe
     
         response.send()
     })
+
+    // enqueueShellyCall("KVS.GetMany", {
+    //     match: `bms/i/${query.cardId}|bms/cfg/default_lock_state|bms/cfg/timeout|bms/cfg/input`
+    // }, function (result) {
+    //     const status = onReadCard(query.cardId, result.items)
+
+    //     response.code = 200
+    //     response.body = JSON.stringify({
+    //         status
+    //     })
+    
+    //     response.send()
+    // })
 }
 
 function setupHTTPServer() {

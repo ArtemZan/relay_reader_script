@@ -8,14 +8,14 @@ function callNext() {
     if (!call) {
         return;
     }
+
     function onComplete(result) {
         print("onComplete");
         if (call[2]) {
             try {
                 print("Calling callback for: ", call[0], "with result: ", JSON.stringify(result));
                 call[2](result);
-            }
-            catch (e) {
+            } catch (e) {
                 print("Shelly call caught an error: ", e);
             }
         }
@@ -25,6 +25,7 @@ function callNext() {
     }
     Shelly.call(call[0], call[1], onComplete);
 }
+
 function enqueueShellyCall(method, params, callback) {
     shellyCallsQueue.push([method, params, callback]);
     if (shellyCallsQueue.length === 1) {
@@ -35,28 +36,80 @@ function enqueueShellyCall(method, params, callback) {
 let BTHome = {
     SVC_ID: "fcd2",
     T: {
-        U8: { sz: 1 },
-        I8: { sz: 1 },
-        U16: { sz: 2 },
-        I16: { sz: 2 },
-        U24: { sz: 3 },
-        I24: { sz: 3 },
-        UUID: { sz: 16 },
+        U8: {
+            sz: 1
+        },
+        I8: {
+            sz: 1
+        },
+        U16: {
+            sz: 2
+        },
+        I16: {
+            sz: 2
+        },
+        U24: {
+            sz: 3
+        },
+        I24: {
+            sz: 3
+        },
+        UUID: {
+            sz: 16
+        },
         getByteSize: function (t) {
             if (typeof this[t] === "undefined") return 0xffffffff;
             return this[t]["sz"];
         },
     },
-    M: [
-        { i: 0x00, n: "PacketId", t: "U8" },
-        { i: 0x01, n: "Battery", t: "U8", u: "%" },
-        { i: 0x05, n: "Illuminance", t: "U8", f: 0.01 },
-        { i: 0x1a, n: "Door", t: "U8" },
-        { i: 0x20, n: "Moisture", t: "U8" },
-        { i: 0x2d, n: "Window", t: "U8" },
-        { i: 0x3a, n: "Button", t: "U8" },
-        { i: 0x3f, n: "Rotation", t: "U16", f: 0.1 },
-        { i: 0xff, n: "Identification", t: "UUID" }
+    M: [{
+            i: 0x00,
+            n: "PacketId",
+            t: "U8"
+        },
+        {
+            i: 0x01,
+            n: "Battery",
+            t: "U8",
+            u: "%"
+        },
+        {
+            i: 0x05,
+            n: "Illuminance",
+            t: "U8",
+            f: 0.01
+        },
+        {
+            i: 0x1a,
+            n: "Door",
+            t: "U8"
+        },
+        {
+            i: 0x20,
+            n: "Moisture",
+            t: "U8"
+        },
+        {
+            i: 0x2d,
+            n: "Window",
+            t: "U8"
+        },
+        {
+            i: 0x3a,
+            n: "Button",
+            t: "U8"
+        },
+        {
+            i: 0x3f,
+            n: "Rotation",
+            t: "U16",
+            f: 0.1
+        },
+        {
+            i: 0xff,
+            n: "Identification",
+            t: "UUID"
+        }
     ],
     utoi: function (num, bitsz) {
         let mask = 1 << (bitsz - 1);
@@ -200,12 +253,18 @@ function handleScanEvent(ev, res) {
     Shelly.emitEvent("BLU_BUTTON", bthome_result);
 }
 if ((Shelly.getComponentConfig('ble')).enable === false) {
-    enqueueShellyCall("BLE.SetConfig", { config: { enable: true } }, function () {
+    enqueueShellyCall("BLE.SetConfig", {
+        config: {
+            enable: true
+        }
+    }, function () {
         enqueueShellyCall("Shelly.Reboot");
     });
 }
 BLE.Scanner.Subscribe(handleScanEvent);
-BLE.Scanner.Start({ duration_ms: BLE.Scanner.INFINITE_SCAN });
+BLE.Scanner.Start({
+    duration_ms: BLE.Scanner.INFINITE_SCAN
+});
 
 
 
@@ -236,7 +295,10 @@ let logScriptId = undefined;
 function handleLogScriptCreate(response) {
     // TODO: check response?
     logScriptId = response["id"];
-    enqueueShellyCall("Script.PutCode", { id: logScriptId, code: " " });
+    enqueueShellyCall("Script.PutCode", {
+        id: logScriptId,
+        code: " "
+    });
 }
 
 enqueueShellyCall("Script.List", null, function (response) {
@@ -250,19 +312,26 @@ enqueueShellyCall("Script.List", null, function (response) {
     }
 
     if (logScriptId === undefined) {
-        enqueueShellyCall("Script.Create", { name: "bms_logs" }, handleLogScriptCreate)
+        enqueueShellyCall("Script.Create", {
+            name: "bms_logs"
+        }, handleLogScriptCreate)
     }
 });
 
-enqueueShellyCall("KVS.Get", { key: "bms/cfg/log_count" }, function (response) {
+enqueueShellyCall("KVS.Get", {
+    key: "bms/cfg/log_count"
+}, function (response) {
     if (!response || response["error"] !== null) {
-        enqueueShellyCall("KVS.Set", { key: "bms/cfg/log_count", value: 0 });
+        enqueueShellyCall("KVS.Set", {
+            key: "bms/cfg/log_count",
+            value: 0
+        });
     }
 });
 
 let lastIdentification = undefined;
 
-function checkLogCount(response, _errorCode, _errorMessage, info) {
+function checkLogCount(response, info) {
     let logCount = response["value"];
     if (logCount < 50) {
         let sysStatus = Shelly.getComponentStatus("sys");
@@ -271,13 +340,27 @@ function checkLogCount(response, _errorCode, _errorMessage, info) {
             identification: info["identification"],
             outcome: info["outcome"]
         };
-        enqueueShellyCall("Script.PutCode", { id: logScriptId, code: JSON.stringify(log), append: true });
-        enqueueShellyCall("KVS.Set", { key: "bms/cfg/log_count", value: logCount + 1 });
+        enqueueShellyCall("Script.PutCode", {
+            id: logScriptId,
+            code: JSON.stringify(log),
+            append: true
+        });
+        enqueueShellyCall("KVS.Set", {
+            key: "bms/cfg/log_count",
+            value: logCount + 1
+        });
     }
 }
 
 function saveAttempt(identification, outcome) {
-    enqueueShellyCall("KVS.Get", { key: "bms/cfg/log_count" }, checkLogCount, { identification: identification, outcome: outcome });
+    enqueueShellyCall("KVS.Get", {
+        key: "bms/cfg/log_count"
+    }, function (result) {
+        checkLogCount(result, {
+            identification: identification,
+            outcome: outcome
+        })
+    });
 }
 
 let LAST_PACKET_IDS = {};
@@ -286,9 +369,10 @@ function saveClose() {
     saveAttempt(lastIdentification, "CLOSED");
 }
 
-function handleKVSBluetoothButtonFetch(response, _errorCode, _errorMessage, info) {
-    info = JSON.parse(info)
-    let items = response["items"];
+function handleKVSBluetoothButtonFetch(response, info) {
+    print("handleKVSBluetoothButtonFetch", info)
+    print(response)
+    let items = response;
     if (items === undefined) {
         return;
     }
@@ -342,18 +426,31 @@ function handleKVSBluetoothButtonFetch(response, _errorCode, _errorMessage, info
     saveAttempt(info["buttonId"], "OK");
 }
 
-function checkButton(response, _errorCode, _errorMessage, info) {
+function checkButton(response, info) {
+    print("checkButton: ", response)
     if (response === null) {
         return;
     }
 
     let expirationTime = response["value"];
     let currTime = Shelly.getComponentStatus("sys")["unixtime"];
+
+    const config_kvs_keys = ["bms/cfg/has_door", "bms/cfg/min_rssi", "bms/cfg/permanent_state", "bms/cfg/default_lock_state", "bms/cfg/timeout", "bms/cfg/input"]
     if (expirationTime && expirationTime < currTime) {
-        enqueueShellyCall("KVS.GetMany", { match: "bms/cfg/*" }, handleKVSBluetoothButtonFetch, JSON.stringify({ buttonId: info.buttonId, error: "EXPIRED_IDENTIFICATION" }));
+        getKVSOneByOne(config_kvs_keys,
+            function (result) {
+                handleKVSBluetoothButtonFetch(result, {
+                    buttonId: info.buttonId,
+                    error: "EXPIRED_IDENTIFICATION"
+                })
+            })
         return;
     }
-    enqueueShellyCall("KVS.GetMany", { match: "bms/cfg/*" }, handleKVSBluetoothButtonFetch, JSON.stringify(info));
+
+    getKVSOneByOne(config_kvs_keys,
+        function (result) {
+            handleKVSBluetoothButtonFetch(result, info)
+        })
 }
 
 function handleBluetoothButton(eventData) {
@@ -376,11 +473,18 @@ function handleBluetoothButton(eventData) {
         return;
     }
     LAST_PACKET_IDS[buttonId] = packetId;
-    enqueueShellyCall("KVS.Get", { key: "bms/i/" + buttonId }, checkButton, { buttonId: buttonId, rssi: eventData["info"]["data"]["rssi"] });
+    enqueueShellyCall("KVS.Get", {
+        key: "bms/i/" + buttonId
+    }, function (result) {
+        checkButton(result, {
+            buttonId: buttonId,
+            rssi: eventData["info"]["data"]["rssi"]
+        })
+    });
 }
 
 function handleKVSPhysicalButtonFetch(response) {
-    let items = response["items"];
+    let items = response;
     if (items === undefined) {
         return;
     }
@@ -400,7 +504,8 @@ function handlePhysicalButton(eventData) {
     if (Shelly.getComponentStatus("ws").connected) {
         return;
     }
-    enqueueShellyCall("KVS.GetMany", { match: "bms/cfg/*" }, handleKVSPhysicalButtonFetch);
+
+    getKVSOneByOne(["bms/cfg/is_emergency"], handleKVSPhysicalButtonFetch)
 }
 
 function dispatchEvent(eventData) {
@@ -417,7 +522,7 @@ function dispatchEvent(eventData) {
 
 function handleKVSStatusFetch(response, _errorCode, _errorMessage, statusData) {
     statusData = JSON.parse(statusData)
-    let items = response["items"];
+    let items = response;
 
     print("handleKVSStatusFetch: ", items, statusData)
 
@@ -453,24 +558,31 @@ function handleKVSStatusFetch(response, _errorCode, _errorMessage, statusData) {
     }
 
     if (hasSecondSwitch) {
-        enqueueShellyCall("Switch.Set", { id: 1, on: statusData["delta"]["output"] });
+        enqueueShellyCall("Switch.Set", {
+            id: 1,
+            on: statusData["delta"]["output"]
+        });
     }
 }
 
 function getKVSOneByOne(keys, callback, callbackParam) {
     const items = {}
 
-    for(const i in keys) {
-        const key = keys[i]
-        enqueueShellyCall("KVS.Get", {
-            key
-        }, function (result) {
-            items[key] = result
+    function createCallback(index) {
+        return function (result) {
+            print("Got result for index: ", index);
+            items[keys[index]] = result
 
-            if(Number(i) === keys.length - 1) {
+            if (Number(index) === keys.length - 1) {
                 callback(items, callbackParam)
             }
-        })
+        }
+    }
+
+    for (const i in keys) {
+        enqueueShellyCall("KVS.Get", {
+            key: keys[i]
+        }, createCallback(i))
     }
 }
 
@@ -479,12 +591,12 @@ function dispatchStatus(statusData) {
     //         return;
     //     }
 
-    if(statusData.component && statusData.component.indexOf("switch:") === 0) {
+    if (statusData.component && statusData.component.indexOf("switch:") === 0) {
         getKVSOneByOne([
             "bms/cfg/input",
             "bms/cfg/permanent_state",
             "bms/cfg/default_lock_state",
-            "bms/cfg/has_second_switch" 
+            "bms/cfg/has_second_switch"
         ], handleKVSStatusFetch, JSON.stringify(statusData));
     }
 }

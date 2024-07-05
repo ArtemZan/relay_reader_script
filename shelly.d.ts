@@ -120,3 +120,4 @@ declare function btoa(string: string): string;
 
 declare function RGBSet(GPIO: number, LEDCount: number, colorHEX: number): void;
 declare function PWMSet(GPIO: number, frequency: number, duty: number): void;
+declare function GPIOSet(GPIO: number, value: number): void;

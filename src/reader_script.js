@@ -348,6 +348,7 @@ function indicateLED(online) {
     }
 }
 function init() {
+    PWMSet(2, 0, 0);
     indicateLED();
     Shelly.addEventHandler(dispatchEvent);
     Shelly.addStatusHandler(dispatchStatus);

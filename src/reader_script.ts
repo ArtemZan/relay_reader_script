@@ -385,6 +385,11 @@ function _ping() {
     wsPongReceived.current = true
 }
 
+function _onDeviceDelete() {
+    RGBSet(0, 12, 0x000000);
+    PWMSet(2, 0, 0);
+}
+
 // Looks for a script named "readers", which is running on the relay, and stores it in relayServerScriptId
 function getRelayServerScriptId() {
     const relayIP = getRelayIP()
